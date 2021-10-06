@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/itzmanish/pratibimb-go/pratibimb/handler"
-	"github.com/itzmanish/pratibimb-go/pratibimb/internal"
+	"github.com/itzmanish/pratibimb-go/handler"
+	"github.com/itzmanish/pratibimb-go/internal"
+	"github.com/itzmanish/pratibimb-go/utils"
 	"github.com/jiyeyuran/mediasoup-go"
 	"github.com/joho/godotenv"
 
@@ -17,7 +18,7 @@ import (
 const (
 	serviceName    = "com.itzmanish.pratibimb.v1"
 	serviceVersion = "1.0.0"
-	serviceAddress = "0.0.0.0:8088"
+	serviceAddress = "0.0.0.0:8443"
 )
 
 func init() {
@@ -38,13 +39,17 @@ func main() {
 		web.Name(serviceName),
 		web.Version(serviceVersion),
 		web.Address(serviceAddress),
-		// web.Secure(true),
-		// web.TLSConfig(utils.LoadTLSCredentials(os.Getenv("CERT_PATH"), os.Getenv("PRIVATE_KEY_PATH"))),
 		web.Registry(registry.DefaultRegistry),
 	)
+	var opts []web.Option
+	if os.Getenv("SECURE_TLS") == "true" {
+		opts = append(opts, web.Secure(os.Getenv("SECURE_TLS") == "true"),
+			web.TLSConfig(utils.LoadTLSCredentials(os.Getenv("CERT_PATH"), os.Getenv("PRIVATE_KEY_PATH"))))
+
+	}
 
 	// initialise service
-	if err := service.Init(); err != nil {
+	if err := service.Init(opts...); err != nil {
 		log.Fatal(err)
 	}
 

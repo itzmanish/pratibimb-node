@@ -11,8 +11,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/itzmanish/go-micro/v2/client"
 	log "github.com/itzmanish/go-micro/v2/logger"
-	accountpb "github.com/itzmanish/pratibimb-go/account/proto/account/v1"
-	"github.com/itzmanish/pratibimb-go/pratibimb/internal"
+	"github.com/itzmanish/pratibimb-go/internal"
 	"github.com/jiyeyuran/mediasoup-go"
 	uuid "github.com/satori/go.uuid"
 )
@@ -24,7 +23,6 @@ type ws struct {
 	rooms                  sync.Map
 	mediasoupWorker        *mediasoup.Worker
 	nextMediasoupWorkerIdx int
-	accountService         accountpb.AccountService
 }
 
 var upgrader = &websocket.Upgrader{
@@ -79,7 +77,6 @@ func NewWsHandler(config internal.Config, c client.Client) *ws {
 		Logger:          logger,
 		config:          config,
 		mediasoupWorker: worker,
-		accountService:  accountpb.NewAccountService("com.itzmanish.pratibimb.service.v1.account", c),
 	}
 }
 

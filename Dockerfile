@@ -11,21 +11,19 @@ COPY go.mod ./
 COPY go.sum ./
 RUN go mod download
 
-COPY *.go ./
+COPY . .
 
-RUN go build -o /docker-gs-ping
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -ldflags '-w' -o pratibimb
 
 ##
 ## Deploy
 ##
-FROM gcr.io/distroless/base-debian10
+FROM debian
 
 WORKDIR /
 
-COPY --from=build /docker-gs-ping /docker-gs-ping
+COPY --from=build /app/pratibimb .
+COPY mediasoup ./mediasoup
+COPY .env .env
 
-EXPOSE 8080
-
-USER nonroot:nonroot
-
-ENTRYPOINT ["/docker-gs-ping"]
+ENTRYPOINT ["/pratibimb"]

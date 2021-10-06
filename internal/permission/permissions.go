@@ -1,6 +1,6 @@
 package permission
 
-import "github.com/itzmanish/pratibimb-go/pratibimb/internal/role"
+import "github.com/itzmanish/pratibimb-go/internal/role"
 
 type Permission string
 type Access string

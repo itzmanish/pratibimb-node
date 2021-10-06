@@ -7,7 +7,7 @@ import (
 
 	"github.com/itzmanish/go-micro/v2/errors"
 	"github.com/itzmanish/go-micro/v2/logger"
-	"github.com/itzmanish/pratibimb-go/pratibimb/internal/role"
+	"github.com/itzmanish/pratibimb-go/internal/role"
 	"github.com/jiyeyuran/go-eventemitter"
 	uuid "github.com/satori/go.uuid"
 )

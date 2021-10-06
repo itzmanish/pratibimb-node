@@ -11,10 +11,17 @@ import (
 )
 
 type Config struct {
-	Domain      string          `json:"domain,omitempty"`
-	Https       HTTPSConfig     `json:"https,omitempty"`
-	FileTracker string          `json:"file_tracker,omitempty"`
-	Mediasoup   MediasoupConfig `json:"mediasoup,omitempty"`
+	Domain         string          `json:"domain,omitempty"`
+	Https          HTTPSConfig     `json:"https,omitempty"`
+	FileTracker    string          `json:"file_tracker,omitempty"`
+	Mediasoup      MediasoupConfig `json:"mediasoup,omitempty"`
+	TurnConfig     []TurnConfig    `json:"turn_config,omitempty"`
+	MaxUserPerRoom int             `json:"max_user_per_room,omitempty"`
+}
+type TurnConfig struct {
+	TurnServerUrls []string `json:"turn_server_urls,omitempty"`
+	TurnUsername   string   `json:"turn_username,omitempty"`
+	TurnCredential string   `json:"turn_credential,omitempty"`
 }
 
 type HTTPSConfig struct {
@@ -111,7 +118,9 @@ var (
 				Key:  filepath.Join(dirname, "certs", "privkey.key"),
 			},
 		},
-		FileTracker: "wss://tracker.lab.vvc.niif.hu:443",
+		FileTracker:    "wss://tracker.lab.vvc.niif.hu:443",
+		TurnConfig:     []TurnConfig{},
+		MaxUserPerRoom: 20,
 		Mediasoup: MediasoupConfig{
 			NumWorkers: runtime.NumCPU(),
 			WorkerSettings: mediasoup.WorkerSettings{

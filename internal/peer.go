@@ -8,7 +8,7 @@ import (
 
 	"github.com/itzmanish/go-micro/v2/errors"
 	log "github.com/itzmanish/go-micro/v2/logger"
-	"github.com/itzmanish/pratibimb-go/pratibimb/internal/role"
+	"github.com/itzmanish/pratibimb-go/internal/role"
 	"github.com/jiyeyuran/go-eventemitter"
 	"github.com/jiyeyuran/mediasoup-go"
 	uuid "github.com/satori/go.uuid"

@@ -9,9 +9,8 @@ import (
 
 	"github.com/itzmanish/go-micro/v2/errors"
 	log "github.com/itzmanish/go-micro/v2/logger"
-	"github.com/itzmanish/pratibimb-go/configs"
-	"github.com/itzmanish/pratibimb-go/pratibimb/internal/permission"
-	"github.com/itzmanish/pratibimb-go/pratibimb/internal/role"
+	"github.com/itzmanish/pratibimb-go/internal/permission"
+	"github.com/itzmanish/pratibimb-go/internal/role"
 	"github.com/jiyeyuran/go-eventemitter"
 	"github.com/jiyeyuran/mediasoup-go"
 	uuid "github.com/satori/go.uuid"
@@ -207,7 +206,7 @@ func (r *Room) HandlePeer(peer *Peer, returning bool) {
 	// 	// Has a role that is allowed to bypass room lock
 	if r.hasAccess(peer, permission.BYPASS_ROOM_LOCK) {
 		r.peerJoining(peer, false)
-	} else if configs.DefaultConfig.MediasoupConfig.MaxUserPerRoom <= len(r.peers)+len(r.lobby.PeerList()) {
+	} else if DefaultConfig.MaxUserPerRoom <= len(r.peers)+len(r.lobby.PeerList()) {
 		r.handleOverRoomLimit(peer)
 	} else if r.locked {
 		r.parkPeer(peer)
@@ -360,7 +359,7 @@ func (r *Room) peerJoining(peer *Peer, returning bool) {
 	if returning {
 		r.notification(peer, "roomBack", nil, false, false)
 	} else {
-		r.notification(peer, "roomReady", configs.DefaultConfig.MediasoupConfig.TurnConfig, false, false)
+		r.notification(peer, "roomReady", DefaultConfig.TurnConfig, false, false)
 	}
 
 }
