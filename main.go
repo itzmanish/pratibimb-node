@@ -53,6 +53,8 @@ func main() {
 		log.Fatal(err)
 	}
 
+	log.Debug(internal.DefaultConfig.Mediasoup.WebRtcTransportOptions.ListenIps)
+
 	// register call handler
 	wshandler := handler.NewWsHandler(internal.DefaultConfig, service.Options().Service.Client())
 	service.Handle("/", handler.NewIndexHandler())

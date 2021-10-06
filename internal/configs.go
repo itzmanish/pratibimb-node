@@ -1,7 +1,8 @@
 package internal
 
 import (
-	"net"
+	"io/ioutil"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -19,9 +20,9 @@ type Config struct {
 	MaxUserPerRoom int             `json:"max_user_per_room,omitempty"`
 }
 type TurnConfig struct {
-	TurnServerUrls []string `json:"turn_server_urls,omitempty"`
-	TurnUsername   string   `json:"turn_username,omitempty"`
-	TurnCredential string   `json:"turn_credential,omitempty"`
+	TurnServerUrls []string `json:"urls,omitempty"`
+	TurnUsername   string   `json:"username,omitempty"`
+	TurnCredential string   `json:"credential,omitempty"`
 }
 
 type HTTPSConfig struct {
@@ -118,8 +119,12 @@ var (
 				Key:  filepath.Join(dirname, "certs", "privkey.key"),
 			},
 		},
-		FileTracker:    "wss://tracker.lab.vvc.niif.hu:443",
-		TurnConfig:     []TurnConfig{},
+		FileTracker: "wss://tracker.lab.vvc.niif.hu:443",
+		TurnConfig: []TurnConfig{
+			{
+				TurnServerUrls: []string{"stun:stun3.l.google.com:19302"},
+			},
+		},
 		MaxUserPerRoom: 20,
 		Mediasoup: MediasoupConfig{
 			NumWorkers: runtime.NumCPU(),
@@ -219,13 +224,14 @@ var (
 
 // Get preferred outbound ip of this machine
 func GetOutboundIP() string {
-	conn, err := net.Dial("udp", "8.8.8.8:80")
+	res, err := http.Get("http://ifconfig.me")
 	if err != nil {
-		return ""
+		return "0.0.0.0"
 	}
-	defer conn.Close()
-
-	localAddr := conn.LocalAddr().(*net.UDPAddr)
-
-	return localAddr.IP.String()
+	defer res.Body.Close()
+	ip, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return "0.0.0.0"
+	}
+	return string(ip)
 }

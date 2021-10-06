@@ -5,7 +5,7 @@ MODIFY=Mproto/imports/api.proto=github.com/itzmanish/go-micro/v2/api/proto
 .PHONY: build
 build:
 
-	go build -o pratibimb-go-web *.go
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -ldflags '-w' -o pratibimb-go
 
 .PHONY: test
 test:
@@ -13,4 +13,4 @@ test:
 
 .PHONY: docker
 docker:
-	docker build . -t pratibimb-go-web:latest
+	docker build . -t pratibimb-go:latest
