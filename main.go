@@ -53,7 +53,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	log.Debug(internal.DefaultConfig.Mediasoup.WebRtcTransportOptions.ListenIps)
+	log.Debugf("webrtc announce ip: %v", internal.DefaultConfig.Mediasoup.WebRtcTransportOptions.ListenIps)
 
 	// register call handler
 	wshandler := handler.NewWsHandler(internal.DefaultConfig, service.Options().Service.Client())
