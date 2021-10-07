@@ -1,14 +1,18 @@
 package internal
 
 import (
+	"encoding/json"
 	"io/ioutil"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
 
+	"github.com/itzmanish/go-micro/v2/logger"
 	"github.com/jiyeyuran/mediasoup-go"
 	"github.com/jiyeyuran/mediasoup-go/h264"
+	"github.com/twilio/twilio-go"
+	openapi "github.com/twilio/twilio-go/rest/api/v2010"
 )
 
 type Config struct {
@@ -20,9 +24,10 @@ type Config struct {
 	MaxUserPerRoom int             `json:"max_user_per_room,omitempty"`
 }
 type TurnConfig struct {
-	TurnServerUrls []string `json:"urls,omitempty"`
-	TurnUsername   string   `json:"username,omitempty"`
-	TurnCredential string   `json:"credential,omitempty"`
+	TurnServerUrls string `json:"urls,omitempty"`
+	TurnServerUrl  string `json:"url,omitempty"`
+	TurnUsername   string `json:"username,omitempty"`
+	TurnCredential string `json:"credential,omitempty"`
 }
 
 type HTTPSConfig struct {
@@ -107,6 +112,8 @@ type WebRtcTransportOptions struct {
 	MaxIncomingBitrate int `json:"maxIncomingBitrate,omitempty"`
 }
 
+var defaultTurnConfig []TurnConfig
+
 var (
 	dirname, _    = filepath.Abs(filepath.Dir(os.Args[0]))
 	DefaultConfig = Config{
@@ -119,12 +126,8 @@ var (
 				Key:  filepath.Join(dirname, "certs", "privkey.key"),
 			},
 		},
-		FileTracker: "wss://tracker.lab.vvc.niif.hu:443",
-		TurnConfig: []TurnConfig{
-			{
-				TurnServerUrls: []string{"stun:stun3.l.google.com:19302"},
-			},
-		},
+		FileTracker:    "wss://tracker.lab.vvc.niif.hu:443",
+		TurnConfig:     getTurnConfigFromTwillio(),
 		MaxUserPerRoom: 20,
 		Mediasoup: MediasoupConfig{
 			NumWorkers: runtime.NumCPU(),
@@ -203,8 +206,8 @@ var (
 			WebRtcTransportOptions: WebRtcTransportOptions{
 				ListenIps: []mediasoup.TransportListenIp{
 					{
-						Ip:          GetOutboundIP(),
-						AnnouncedIp: GetOutboundIP(),
+						Ip:          "0.0.0.0",       // private ip
+						AnnouncedIp: GetOutboundIP(), // public ip
 					},
 				},
 				InitialAvailableOutgoingBitrate: 1000000,
@@ -213,8 +216,8 @@ var (
 			},
 			PlainTransportOptions: mediasoup.PlainTransportOptions{
 				ListenIp: mediasoup.TransportListenIp{
-					Ip:          GetOutboundIP(),
-					AnnouncedIp: GetOutboundIP(),
+					Ip:          "0.0.0.0",       //private ip
+					AnnouncedIp: GetOutboundIP(), //public ip
 				},
 				MaxSctpMessageSize: 262144,
 			},
@@ -234,4 +237,32 @@ func GetOutboundIP() string {
 		return "0.0.0.0"
 	}
 	return string(ip)
+}
+
+func getTurnConfigFromTwillio() []TurnConfig {
+	if len(defaultTurnConfig) != 0 {
+		return defaultTurnConfig
+	}
+	client := twilio.NewRestClientWithParams(twilio.RestClientParams{
+		Username: os.Getenv("TWILIO_ACCOUNT_SID"),
+		Password: os.Getenv("TWILIO_AUTH_TOKEN"),
+	})
+	token, err := client.ApiV2010.CreateToken(&openapi.CreateTokenParams{})
+	if err != nil {
+		logger.Debugf("Failed to get token with err: %v", err)
+		return []TurnConfig{}
+	}
+	iceServers, err := json.Marshal(token.IceServers)
+	if err != nil {
+		logger.Debugf("Turn config is not valid: %v, [Err: %v]", token, err)
+		return []TurnConfig{}
+	}
+	var turnConfig []TurnConfig
+	err = json.Unmarshal(iceServers, &turnConfig)
+	if err != nil {
+		logger.Debugf("Turn config is not valid: %v, [Err: %v]", string(iceServers), err)
+		return []TurnConfig{}
+	}
+	defaultTurnConfig = turnConfig
+	return turnConfig
 }

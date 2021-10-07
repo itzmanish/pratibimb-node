@@ -18,5 +18,6 @@ require (
 	github.com/jkawamoto/structpbconv v0.0.0-20191225002205-7d1a3174c262
 	github.com/joho/godotenv v1.4.0
 	github.com/satori/go.uuid v1.2.0
+	github.com/twilio/twilio-go v0.15.0
 	golang.org/x/crypto v0.0.0-20201221181555-eec23a3978ad
 )
