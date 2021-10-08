@@ -26,7 +26,7 @@ type Room struct {
 	logger               log.Logger
 	lobby                *Lobby
 	peers                map[uuid.UUID]*Peer
-	chatHistory          []string
+	chatHistory          []map[string]interface{}
 	fileHistory          []string
 	lastN                []uuid.UUID
 	closed               int32
@@ -76,7 +76,7 @@ func NewRoom(mediasoupWorker *mediasoup.Worker, roomID string, accessCode int32)
 		peers:               make(map[uuid.UUID]*Peer),
 		EventEmitter:        eventemitter.NewEventEmitter(),
 		selfDestructTimeout: 1 * time.Minute,
-		chatHistory:         make([]string, 0),
+		chatHistory:         make([]map[string]interface{}, 0),
 		fileHistory:         make([]string, 0),
 		lastN:               make([]uuid.UUID, 0),
 		accessCode:          accessCode,
@@ -144,6 +144,9 @@ func (r *Room) CreatePeer(peerId, roomID uuid.UUID, transport Transport) (peer *
 	if _, ok := r.peers[peerId]; ok {
 		transport.Close()
 		err = errors.Conflict("PEER_EXISTS", `there is already a Peer with same peerId [peerId:"%s"]`, peerId)
+		r.locker.Lock()
+		delete(r.peers, peerId)
+		r.locker.Unlock()
 		return
 	}
 
@@ -510,6 +513,7 @@ func (r *Room) handleTransportRequest(peer *Peer, req Message, accept func(data 
 		}
 
 		peer.SetRtpCapabilities(requestData.RtpCapabilities)
+		peer.SetDisplayName(requestData.DisplayName)
 
 		joinedPeers := r.getJoinedPeers(peer)
 
@@ -970,9 +974,8 @@ func (r *Room) handleTransportRequest(peer *Peer, req Message, accept func(data 
 
 	// case "produceData":
 	// 	// Ensure the Peer is joined.
-	// 	if !peerData.Joined {
-	// 		err = errors.New("Peer not yet joined")
-	// 		return
+	// 	if !peer.GetJoined() {
+	// 		return ErrPeerNotJoined
 	// 	}
 	// 	var requestData struct {
 	// 		TransportId          string                          `json:"transportId,omitempty"`
@@ -981,13 +984,12 @@ func (r *Room) handleTransportRequest(peer *Peer, req Message, accept func(data 
 	// 		Protocol             string                          `json:"protocol,omitempty"`
 	// 		AppData              H                               `json:"appData,omitempty"`
 	// 	}
-	// 	if err = PbToStruct(request.Data, &requestData); err != nil {
-	// 		return
+	// 	if err := json.Unmarshal(req.Data, &requestData); err != nil {
+	// 		return errors.BadRequest("BAD_DATA_FORMAT", "Bad Data format", err)
 	// 	}
-	// 	transport, ok := peerData.Transports[requestData.TransportId]
+	// 	transport, ok := peer.GetTransport(requestData.TransportId)
 	// 	if !ok {
-	// 		err = fmt.Errorf(`transport with id "%s" not found`, requestData.TransportId)
-	// 		return
+	// 		return ErrTransportNotFound(requestData.TransportId)
 	// 	}
 	// 	dataProducer, err := transport.ProduceData(mediasoup.DataProducerOptions{
 	// 		SctpStreamParameters: requestData.SctpStreamParameters,
@@ -998,7 +1000,7 @@ func (r *Room) handleTransportRequest(peer *Peer, req Message, accept func(data 
 	// 	if err != nil {
 	// 		return err
 	// 	}
-	// 	peerData.DataProducers[dataProducer.Id()] = dataProducer
+	// 	peer.prod[dataProducer.Id()] = dataProducer
 
 	// 	accept(H{"id": dataProducer.Id()})
 
@@ -1140,17 +1142,17 @@ func (r *Room) handleTransportRequest(peer *Peer, req Message, accept func(data 
 			return ErrPeerNotAuthorized
 		}
 		var requestData struct {
-			chatMessage string
+			ChatMessage map[string]interface{} `json:"chatMessage"`
 		}
 		if err := json.Unmarshal(req.Data, &requestData); err != nil {
 			return errors.BadRequest("BAD_DATA_FORMAT", "Bad Data format", err)
 		}
-		r.chatHistory = append(r.chatHistory, requestData.chatMessage)
+		r.chatHistory = append(r.chatHistory, requestData.ChatMessage)
 
 		// Notify to others
 		r.notification(peer, "chatMessage", H{
 			"peerId":      peer.GetID(),
-			"chatMessage": requestData.chatMessage,
+			"chatMessage": requestData.ChatMessage,
 		}, true, false)
 
 		accept(nil)
@@ -1160,7 +1162,7 @@ func (r *Room) handleTransportRequest(peer *Peer, req Message, accept func(data 
 			return ErrPeerNotAuthorized
 		}
 
-		r.chatHistory = []string{}
+		r.chatHistory = make([]map[string]interface{}, 0)
 
 		// Notify to others
 		r.notification(peer, "moderator:clearChat", nil, true, false)
@@ -1544,6 +1546,7 @@ func (r *Room) createConsumer(consumerPeer, producerPeer *Peer, producer *medias
 		ProducerId:      producer.Id(),
 		RtpCapabilities: *consumerPeer.GetRtpCapabilities(),
 		Paused:          producer.Kind() == mediasoup.MediaKind_Video,
+		AppData:         producer.AppData(),
 	})
 	if err != nil {
 		r.logger.Logf(log.ErrorLevel, "createConsumer() | transport.consume() Error: %v", err)

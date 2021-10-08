@@ -227,6 +227,9 @@ var (
 
 // Get preferred outbound ip of this machine
 func GetOutboundIP() string {
+	if os.Getenv("ENV") != "production" {
+		return ""
+	}
 	res, err := http.Get("http://ifconfig.me")
 	if err != nil {
 		return "0.0.0.0"
