@@ -42,7 +42,7 @@ func NewWsHandler(config internal.Config, c client.Client) *ws {
 	logger := log.NewLogger(log.WithFields(map[string]interface{}{"caller": "WS Handler"}))
 
 	workers := []*mediasoup.Worker{}
-	for i := 0; i < internal.DefaultConfig.Mediasoup.NumWorkers/2; i++ {
+	for i := 0; i < internal.DefaultConfig.Mediasoup.NumWorkers; i++ {
 		worker, err := mediasoup.NewWorker(
 			mediasoup.WithLogLevel(config.Mediasoup.WorkerSettings.LogLevel),
 			mediasoup.WithLogTags(config.Mediasoup.WorkerSettings.LogTags),

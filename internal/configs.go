@@ -206,7 +206,7 @@ var (
 			WebRtcTransportOptions: WebRtcTransportOptions{
 				ListenIps: []mediasoup.TransportListenIp{
 					{
-						Ip:          "192.168.0.105", // private ip
+						Ip:          "0.0.0.0",       // private ip
 						AnnouncedIp: GetOutboundIP(), // public ip
 					},
 				},

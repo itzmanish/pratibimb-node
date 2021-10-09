@@ -58,6 +58,8 @@ func NewRoom(mediasoupWorker []*mediasoup.Worker, roomID string, accessCode int3
 		Interval:   800,
 	}
 
+	log.Debugf("Routers available: %v, Count: %d", routers, len(routers))
+
 	firstRouter, err := getNextRouter(nil, routers)
 	if err != nil {
 		return nil, err
