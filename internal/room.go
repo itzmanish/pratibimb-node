@@ -24,7 +24,6 @@ type Room struct {
 	AudioLevelObserver   mediasoup.IRtpObserver
 	Router               *mediasoup.Router
 	logger               log.Logger
-	lobby                *Lobby
 	peers                map[uuid.UUID]*Peer
 	chatHistory          []map[string]interface{}
 	fileHistory          []string
@@ -69,7 +68,6 @@ func NewRoom(mediasoupWorker *mediasoup.Worker, roomID string, accessCode int32)
 	room := &Room{
 		ID:                  uuid.NewV4(),
 		RoomName:            roomID,
-		lobby:               NewLobby(),
 		Router:              router,
 		AudioLevelObserver:  audioLevelObserver,
 		logger:              log.NewLogger(log.WithFields(map[string]interface{}{"caller": "Room"})),
@@ -82,7 +80,6 @@ func NewRoom(mediasoupWorker *mediasoup.Worker, roomID string, accessCode int32)
 		accessCode:          accessCode,
 	}
 
-	room.handleLobby()
 	room.handleAudioLevelObserver()
 
 	return room, nil
@@ -195,93 +192,18 @@ func (r *Room) VerifyPeer(id uuid.UUID) bool {
 func (r *Room) HandlePeer(peer *Peer, returning bool) {
 	r.logger.Logf(log.InfoLevel, "[peer:%v, roles:%v, returning:%v]", peer.GetID(), peer.GetRoles(), returning)
 
-	// Should not happen
-	// for _, p := range r.peers {
-	// 	if p.ID == peer.ID {
-	// 		r.logger.Logf(log.WarnLevel, "HandlePeer() | there is already a peer with same peerId [peer:%v]", peer.ID)
-	// 	}
-	// }
-
 	// Returning user
 	if returning {
 		r.peerJoining(peer, true)
-	} else
-	// 	// Has a role that is allowed to bypass room lock
-	if r.hasAccess(peer, permission.BYPASS_ROOM_LOCK) {
-		r.peerJoining(peer, false)
-	} else if DefaultConfig.MaxUserPerRoom <= len(r.peers)+len(r.lobby.PeerList()) {
+	} else if DefaultConfig.MaxUserPerRoom <= len(r.peers) {
 		r.handleOverRoomLimit(peer)
-	} else if r.locked {
-		r.parkPeer(peer)
 	} else {
-
-		if r.hasAccess(peer, permission.BYPASS_LOBBY) {
-			r.peerJoining(peer, false)
-		} else {
-			r.handleGuest(peer)
-		}
+		r.peerJoining(peer, false)
 	}
 }
 
 func (r *Room) handleOverRoomLimit(peer *Peer) {
 	r.notification(peer, "overRoomLimit", nil, false, false)
-}
-
-func (r *Room) handleGuest(peer *Peer) {
-	r.parkPeer(peer)
-	r.notification(peer, "signInRequired", nil, false, false)
-	// if (config.activateOnHostJoin && !this.checkEmpty())
-	// 		this._peerJoining(peer);
-	// 	else
-	// 	{
-	// 		this._parkPeer(peer);
-	// 		this._notification(peer.socket, 'signInRequired');
-	// 	}
-}
-
-func (r *Room) handleLobby() {
-	r.lobby.On("promotePeer", func(promotedPeer *Peer) {
-		r.logger.Log(log.InfoLevel, "promoted peer: ", promotedPeer.ID)
-		r.peerJoining(promotedPeer, false)
-		for _, p := range r.getAllowedPeers(permission.PROMOTE_PEER, nil, true) {
-			r.notification(p, "Lobby.PromotePeer", H{"peerId": promotedPeer.GetID(), "peerName": promotedPeer.GetDisplayName()}, false, false)
-		}
-	})
-
-	r.lobby.On("peerRolesChanged", func(peer *Peer) {
-		if r.hasAccess(peer, permission.BYPASS_ROOM_LOCK) {
-			r.lobby.PromotePeer(peer.ID)
-			return
-		}
-		if !r.locked && r.hasAccess(peer, permission.BYPASS_LOBBY) {
-			r.lobby.PromotePeer(peer.ID)
-		}
-	})
-
-	r.lobby.On("changeDisplayName", func(changedPeer *Peer) {
-		for _, p := range r.getAllowedPeers(permission.PROMOTE_PEER, nil, true) {
-			r.notification(p, "Lobby.changeDisplayName", H{"peerId": changedPeer.GetID(), "peerName": changedPeer.GetDisplayName()}, false, false)
-		}
-	})
-
-	r.lobby.On("changePicture", func(changedPeer *Peer) {
-		for _, p := range r.getAllowedPeers(permission.PROMOTE_PEER, nil, true) {
-			r.notification(p, "Lobby.changePicture", H{"peerId": changedPeer.GetID(), "picture": changedPeer.ProfilePictureURL}, false, false)
-		}
-	})
-
-	r.lobby.On("peerClosed", func(closedPeer *Peer) {
-		r.logger.Log(log.InfoLevel, "closed Peer: ", closedPeer.ID)
-		for _, p := range r.getAllowedPeers(permission.PROMOTE_PEER, nil, true) {
-			r.notification(p, "Lobby.peerClosed", H{"peerId": closedPeer.GetID(), "peerName": closedPeer.GetDisplayName()}, false, false)
-		}
-	})
-
-	r.lobby.On("lobbyEmpty", func() {
-		if r.CheckEmpty() {
-			r.selfDestructCountdown()
-		}
-	})
 }
 
 func (r *Room) handleAudioLevelObserver() {
@@ -321,7 +243,7 @@ func (r *Room) selfDestructCountdown() {
 			wg.Done()
 			return
 		}
-		if r.CheckEmpty() && r.lobby.CheckEmpty() {
+		if r.CheckEmpty() {
 			r.logger.Logf(log.InfoLevel, "Room deserted for some time, closing the room [roomId: %s]", r.GetID())
 			r.Close()
 			wg.Done()
@@ -335,15 +257,6 @@ func (r *Room) selfDestructCountdown() {
 
 func (r *Room) CheckEmpty() bool {
 	return len(r.peers) == 0
-}
-
-func (r *Room) parkPeer(peer *Peer) {
-	r.lobby.ParkPeer(peer)
-
-	for _, p := range r.getAllowedPeers(permission.PROMOTE_PEER, nil, true) {
-		r.notification(p, "parkedPeer", H{"peerId": peer.GetID()}, false, false)
-	}
-
 }
 
 func (r *Room) peerJoining(peer *Peer, returning bool) {
@@ -396,17 +309,6 @@ func (r *Room) handlePeer(peer *Peer) {
 		}
 		r.notification(peer, "gotRole",
 			H{"peerId": nil, "role": newRole}, true, true)
-		if roles, ok := permission.RoomPermissions[permission.PROMOTE_PEER]; ok {
-			for _, ro := range roles {
-				if ro == newRole {
-					lobbyPeers := r.lobby.PeerList()
-					if len(lobbyPeers) > 0 {
-						r.notification(peer, "parkedPeers",
-							H{"lobbyPeers": lobbyPeers}, false, false)
-					}
-				}
-			}
-		}
 	})
 
 	peer.On("lostRole", func(oldRole role.Role) {
@@ -453,17 +355,7 @@ func (r *Room) handlePeerClose(peer *Peer) {
 	}
 	r.lastN = filteredLastN
 	r.locker.Unlock()
-	// Need this to know if this peer was the last with PROMOTE_PEER
-	var hasPromotePeer bool
-	for _, r := range peer.roles {
-		if rr, ok := permission.RoomPermissions[permission.PROMOTE_PEER]; ok {
-			for _, rrr := range rr {
-				if r == rrr {
-					hasPromotePeer = true
-				}
-			}
-		}
-	}
+
 	var filteredPeers = make(map[uuid.UUID]*Peer)
 	r.locker.Lock()
 	for _, p := range r.peers {
@@ -473,24 +365,10 @@ func (r *Room) handlePeerClose(peer *Peer) {
 	}
 	r.peers = filteredPeers
 	r.locker.Unlock()
-	// No peers left with PROMOTE_PEER, might need to give
-	// lobbyPeers to peers that are left.
-	var allowedWhenRoleMissing bool
-	for _, perm := range permission.AllowWhenRoleMissing {
-		if perm == permission.PROMOTE_PEER {
-			allowedWhenRoleMissing = true
-		}
-	}
-	if hasPromotePeer && !r.lobby.CheckEmpty() && len(r.getPeersWithPermission(permission.PROMOTE_PEER, nil, true)) == 0 && allowedWhenRoleMissing {
-		for _, p := range r.getAllowedPeers(permission.PROMOTE_PEER, nil, true) {
-			r.notification(p, "parkedPeers",
-				H{"lobbyPeers": r.lobby.PeerList()}, false, false,
-			)
-		}
-	}
+
 	// If this is the last Peer in the room and
 	// lobby is empty, close the room after a while.
-	if r.CheckEmpty() && r.lobby.CheckEmpty() {
+	if r.CheckEmpty() {
 		r.selfDestructCountdown()
 	}
 }
@@ -527,13 +405,6 @@ func (r *Room) handleTransportRequest(peer *Peer, req Message, accept func(data 
 			})
 		}
 
-		lobbyPeers := []*Peer{}
-
-		// Allowed to promote peers, notify about lobbypeers
-		if r.hasPermission(peer, permission.PROMOTE_PEER) {
-			lobbyPeers = r.lobby.PeerList()
-		}
-
 		db := H{
 			"peers":                peerInfos,
 			"roles":                peer.GetRoles(),
@@ -545,7 +416,6 @@ func (r *Room) handleTransportRequest(peer *Peer, req Message, accept func(data 
 			"fileHistory":          r.fileHistory,
 			"lastNHistory":         r.lastN,
 			"locked":               r.locked,
-			"lobbyPeers":           lobbyPeers,
 			"accessCode":           r.accessCode,
 		}
 
@@ -1215,36 +1085,6 @@ func (r *Room) handleTransportRequest(peer *Peer, req Message, accept func(data 
 		}
 		// Notify to others
 		r.notification(peer, "setAccessCode", db, true, false)
-
-		accept(nil)
-
-	case "promotePeer":
-		if !r.hasPermission(peer, permission.PROMOTE_PEER) {
-			return ErrPeerNotAuthorized
-		}
-
-		var requestData struct {
-			peerId string
-		}
-
-		if err := json.Unmarshal(req.Data, &requestData); err != nil {
-			return errors.BadRequest("BAD_DATA_FORMAT", "Bad Data format", err)
-		}
-		id, err := uuid.FromString(requestData.peerId)
-		if err != nil {
-			return err
-		}
-
-		r.lobby.PromotePeer(id)
-
-		accept(nil)
-
-	case "promoteAllPeers":
-		if !r.hasPermission(peer, permission.MODERATE_CHAT) {
-			return ErrPeerNotAuthorized
-		}
-
-		r.lobby.PromoteAllPeers()
 
 		accept(nil)
 
