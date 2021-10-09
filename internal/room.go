@@ -22,7 +22,7 @@ type Room struct {
 	ID                   uuid.UUID
 	RoomName             string
 	AudioLevelObserver   mediasoup.IRtpObserver
-	Router               *mediasoup.Router
+	Routers              map[string]*mediasoup.Router
 	logger               log.Logger
 	peers                map[uuid.UUID]*Peer
 	chatHistory          []map[string]interface{}
@@ -37,15 +37,19 @@ type Room struct {
 
 var wg sync.WaitGroup
 
-func NewRoom(mediasoupWorker *mediasoup.Worker, roomID string, accessCode int32) (*Room, error) {
+func NewRoom(mediasoupWorker []*mediasoup.Worker, roomID string, accessCode int32) (*Room, error) {
 
 	log.Infof("create() [RoomId: %s]", roomID)
 
-	router, err := mediasoupWorker.CreateRouter(
-		DefaultConfig.Mediasoup.RouterOptions,
-	)
-	if err != nil {
-		return nil, err
+	routers := map[string]*mediasoup.Router{}
+	for _, worker := range mediasoupWorker {
+		router, err := worker.CreateRouter(
+			DefaultConfig.Mediasoup.RouterOptions,
+		)
+		if err != nil {
+			return nil, err
+		}
+		routers[router.Id()] = router
 	}
 
 	audioLevelObserverOption := &mediasoup.AudioLevelObserverOptions{
@@ -53,8 +57,14 @@ func NewRoom(mediasoupWorker *mediasoup.Worker, roomID string, accessCode int32)
 		Threshold:  -80,
 		Interval:   800,
 	}
+
+	firstRouter, err := getNextRouter(nil, routers)
+	if err != nil {
+		return nil, err
+	}
+
 	// Create a mediasoup AudioLevelObserver on first router
-	audioLevelObserver, err := router.CreateAudioLevelObserver(
+	audioLevelObserver, err := firstRouter.CreateAudioLevelObserver(
 		func(o *mediasoup.AudioLevelObserverOptions) {
 			o.MaxEntries = audioLevelObserverOption.MaxEntries
 			o.Threshold = audioLevelObserverOption.Threshold
@@ -68,7 +78,7 @@ func NewRoom(mediasoupWorker *mediasoup.Worker, roomID string, accessCode int32)
 	room := &Room{
 		ID:                  uuid.NewV4(),
 		RoomName:            roomID,
-		Router:              router,
+		Routers:             routers,
 		AudioLevelObserver:  audioLevelObserver,
 		logger:              log.NewLogger(log.WithFields(map[string]interface{}{"caller": "Room"})),
 		peers:               make(map[uuid.UUID]*Peer),
@@ -109,7 +119,9 @@ func (r *Room) Close() {
 	if atomic.CompareAndSwapInt32(&r.closed, 0, 1) {
 		r.logger.Log(log.InfoLevel, "room closed")
 	}
-	r.Router.Close()
+	for _, router := range r.Routers {
+		router.Close()
+	}
 	r.SafeEmit("close")
 }
 
@@ -141,9 +153,7 @@ func (r *Room) CreatePeer(peerId, roomID uuid.UUID, transport Transport) (peer *
 	if _, ok := r.peers[peerId]; ok {
 		transport.Close()
 		err = errors.Conflict("PEER_EXISTS", `there is already a Peer with same peerId [peerId:"%s"]`, peerId)
-		r.locker.Lock()
 		delete(r.peers, peerId)
-		r.locker.Unlock()
 		return
 	}
 
@@ -223,12 +233,15 @@ func (r *Room) handleAudioLevelObserver() {
 }
 
 func (r *Room) LogStatus() {
-	dump, err := r.Router.Dump()
-	if err != nil {
-		r.logger.Logf(log.ErrorLevel, "LogStatus error: %v", err)
-		return
+	for _, router := range r.Routers {
+		dump, err := router.Dump()
+		if err != nil {
+			r.logger.Logf(log.ErrorLevel, "LogStatus error: %v", err)
+			return
+		}
+		r.logger.Logf(log.DebugLevel, "RoomID: %s Peers Length: %d, transports: %v", r.ID.String(), len(r.peers), dump.TransportIds)
 	}
-	r.logger.Logf(log.DebugLevel, "RoomID: %s Peers Length: %d, transports: %v", r.ID.String(), len(r.peers), dump.TransportIds)
+
 }
 
 func (r *Room) GetID() string {
@@ -265,12 +278,11 @@ func (r *Room) peerJoining(peer *Peer, returning bool) {
 			r.lastN = append(r.lastN, peer.ID)
 		}
 	}
+	r.locker.Lock()
 	r.peers[peer.ID] = peer
+	r.locker.Unlock()
 
-	// Assign router
-	// TODO:r.getRouter()
-	// router := r.getRouter()
-	peer.router = r.Router
+	peer.router = r.GetLeastLoadedRouter(peer)
 	r.handlePeer(peer)
 	if returning {
 		r.notification(peer, "roomBack", nil, false, false)
@@ -374,7 +386,7 @@ func (r *Room) handlePeerClose(peer *Peer) {
 }
 
 func (r *Room) handleTransportRequest(peer *Peer, req Message, accept func(data interface{})) error {
-	router := r.Router
+	router := peer.router
 	r.logger.Logf(log.InfoLevel, "request recieved with method: %v", req.Method)
 	switch req.Method {
 	case "getRouterRtpCapabilities":
@@ -622,19 +634,22 @@ func (r *Room) handleTransportRequest(peer *Peer, req Message, accept func(data 
 		if err != nil {
 			return err
 		}
-		// TODO:DOn't pipetoroute for now.
-		// pipeRouters := r.getRoutersToPipeTo(peer.GetRouterID())
+		pipeRouters := r.getRoutersToPipeTo(peer.GetRouterID())
 
-		// for routerId, destinationRouter := range r.MediasoupRouters {
-		// 	for _, router := range pipeRouters {
-		// 		if router.Id() == routerId {
-		// 			router.PipeToRouter(mediasoup.PipeToRouterOptions{
-		// 				ProducerId: producer.Id(),
-		// 				Router:     destinationRouter,
-		// 			})
-		// 		}
-		// 	}
-		// }
+		for routerId, destinationRouter := range r.Routers {
+			has := false
+			for _, rr := range pipeRouters {
+				if rr.Id() == routerId {
+					has = true
+				}
+			}
+			if has {
+				router.PipeToRouter(mediasoup.PipeToRouterOptions{
+					ProducerId: producer.Id(),
+					Router:     destinationRouter,
+				})
+			}
+		}
 		// Store the Producer into the protoo Peer data Object.
 		peer.AddProducer(producer)
 
@@ -1370,7 +1385,7 @@ func (r *Room) createConsumer(consumerPeer, producerPeer *Peer, producer *medias
 
 	// NOTE: Don"t create the Consumer if the remote Peer cannot consume it.
 	if consumerPeer.GetRtpCapabilities() == nil ||
-		!r.Router.CanConsume(producer.Id(), *consumerPeer.GetRtpCapabilities()) {
+		!producerPeer.router.CanConsume(producer.Id(), *consumerPeer.GetRtpCapabilities()) {
 		return
 	}
 
@@ -1520,11 +1535,13 @@ func (r *Room) hasAccess(peer *Peer, access permission.Access) bool {
 // getJoinedPeers returns joined peers
 func (r *Room) getJoinedPeers(excludePeer *Peer) []*Peer {
 	var peers []*Peer
+	r.locker.RLock()
 	for _, p := range r.peers {
 		if p.GetJoined() && !MatchPeer(p, excludePeer) {
 			peers = append(peers, p)
 		}
 	}
+	r.locker.RUnlock()
 	return peers
 }
 
@@ -1545,12 +1562,13 @@ func (r *Room) getAllowedPeers(perm permission.Permission, excludePeer *Peer, jo
 func (r *Room) getPeersWithPermission(perm permission.Permission, excludePeer *Peer, joined bool) []*Peer {
 	//joined =true
 	var peers []*Peer
+	r.locker.RLock()
 	for _, p := range r.peers {
-
 		if p.joined == joined && MatchPeer(p, excludePeer) && r.hasPermission(p, perm) {
 			peers = append(peers, p)
 		}
 	}
+	r.locker.RUnlock()
 	return peers
 }
 
@@ -1574,9 +1592,95 @@ func (r *Room) notification(peer *Peer, message string, data interface{}, broadc
 	}
 }
 
+func (r *Room) GetLeastLoadedRouter(excludePeer ...*Peer) *mediasoup.Router {
+	router, _ := getNextRouter(r.Peers(), r.Routers, excludePeer...)
+	r.pipeProducersToRouter(router, excludePeer...)
+	return router
+}
+
+func (r *Room) pipeProducersToRouter(router *mediasoup.Router, excludePeer ...*Peer) {
+	peersToPipe := []*Peer{}
+
+	for _, peer := range PeersWithoutMatchedPeers(r.Peers(), excludePeer...) {
+		if peer.GetRouterID() != router.Id() {
+			peersToPipe = append(peersToPipe, peer)
+		}
+	}
+	for _, peer := range peersToPipe {
+		srcRouter := r.Routers[peer.GetRouterID()]
+		for producerId := range peer.GetProducers() {
+			rProducers := router.GetProducers()
+			if _, ok := rProducers.Load(producerId); ok {
+				continue
+			}
+			srcRouter.PipeToRouter(mediasoup.PipeToRouterOptions{
+				ProducerId: producerId,
+				Router:     router,
+			})
+		}
+	}
+}
+
+func (r *Room) getRoutersToPipeTo(originRouterId string) []*mediasoup.Router {
+	routers := []*mediasoup.Router{}
+	for _, peer := range r.Peers() {
+		if peer.GetRouterID() != originRouterId {
+			routers = append(routers, peer.router)
+		}
+	}
+	return routers
+}
+
+func getNextRouter(peers []*Peer, routers map[string]*mediasoup.Router, excludePeer ...*Peer) (*mediasoup.Router, error) {
+	if len(routers) == 0 {
+		return nil, ErrNoRouterExists
+	}
+	finalPeers := PeersWithoutMatchedPeers(peers, excludePeer...)
+
+	if len(finalPeers) == 0 {
+		for _, router := range routers {
+			return router, nil
+		}
+	}
+	routerLoad := map[string]int{}
+	leastLoadedRouterId := ""
+	leastLoadedRouterLoad := 100
+	for id := range routers {
+		leastLoadedRouterId = id
+		routerLoad[id] = 0
+	}
+	for _, peer := range finalPeers {
+		if _, ok := routerLoad[peer.GetRouterID()]; ok {
+			routerLoad[peer.GetRouterID()] += 1
+		}
+		routerLoad[peer.GetRouterID()] = 1
+	}
+	for routerId, load := range routerLoad {
+		if load < leastLoadedRouterLoad {
+			leastLoadedRouterLoad = load
+			leastLoadedRouterId = routerId
+		}
+	}
+	return routers[leastLoadedRouterId], nil
+}
+
+// MatchPeer match two peers and return true if both are same else false.
 func MatchPeer(peer1, peer2 *Peer) bool {
 	if (peer1 != nil || peer2 != nil) && (uuid.Equal(peer1.ID, peer2.ID)) {
 		return true
 	}
 	return false
+}
+
+// PeersWithouthMatchedPeers returns peers which are not present in excluded peer slice.
+func PeersWithoutMatchedPeers(peers []*Peer, excludePeer ...*Peer) []*Peer {
+	out := []*Peer{}
+	for _, peer := range peers {
+		for _, exPeer := range excludePeer {
+			if !MatchPeer(peer, exPeer) {
+				out = append(out, peer)
+			}
+		}
+	}
+	return out
 }

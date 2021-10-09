@@ -23,4 +23,5 @@ var (
 	ErrConsumerNotFound = func(id string) error {
 		return errors.NotFound("CONSUMER_NOT_FOUND", fmt.Sprintf(`Consumer with id "%s" not found`, id))
 	}
+	ErrNoRouterExists = errors.InternalServerError("ROUTER_DOES_NOT_EXIST", "no router available")
 )

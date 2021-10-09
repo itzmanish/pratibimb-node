@@ -3,6 +3,8 @@ package internal
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/itzmanish/go-micro/v2/errors"
 )
 
 type Message struct {
@@ -32,7 +34,7 @@ func NewError(code int, reason string) *Error {
 }
 
 func (e Error) Error() string {
-	return fmt.Sprintf("%s: %d: %s", e.Id, e.Code, e.Detail)
+	return fmt.Sprintf("ID: %s, Code: %d, Details: %s", e.Id, e.Code, e.Detail)
 }
 
 func (m Message) String() string {
@@ -91,6 +93,20 @@ func CreateErrorNotification(method string, err error) Message {
 	return Message{
 		Notification: true,
 		Method:       method,
-		Error:        err.(*Error),
+		Error:        parseMicroError(err),
 	}
+}
+
+func parseMicroError(err error) *Error {
+	IErr, ok := err.(Error)
+	if !ok {
+		merr := errors.FromError(err)
+		return &Error{
+			Id:     merr.Id,
+			Code:   int(merr.Code),
+			Status: merr.Status,
+			Detail: merr.Detail,
+		}
+	}
+	return &IErr
 }

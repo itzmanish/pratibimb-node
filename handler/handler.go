@@ -21,7 +21,7 @@ type ws struct {
 	log.Logger
 	config                 internal.Config
 	rooms                  sync.Map
-	mediasoupWorker        *mediasoup.Worker
+	mediasoupWorker        []*mediasoup.Worker
 	nextMediasoupWorkerIdx int
 }
 
@@ -41,42 +41,44 @@ func NewIndexHandler() *indexHandler {
 func NewWsHandler(config internal.Config, c client.Client) *ws {
 	logger := log.NewLogger(log.WithFields(map[string]interface{}{"caller": "WS Handler"}))
 
-	worker, err := mediasoup.NewWorker(
-		mediasoup.WithLogLevel(config.Mediasoup.WorkerSettings.LogLevel),
-		mediasoup.WithLogTags(config.Mediasoup.WorkerSettings.LogTags),
-		mediasoup.WithRtcMinPort(config.Mediasoup.WorkerSettings.RtcMinPort),
-		mediasoup.WithRtcMaxPort(config.Mediasoup.WorkerSettings.RtcMaxPort),
-	)
-	if err != nil {
-		panic(err)
-	}
-
-	worker.On("died", func(err error) {
-		log.Error("[Error: %v] exiting in 2 second ...", err)
-		time.AfterFunc(2*time.Second, func() {
-			os.Exit(1)
-		})
-	})
-
-	go func() {
-		ticker := time.NewTicker(120 * time.Second)
-		for {
-			select {
-			case <-ticker.C:
-				usage, err := worker.GetResourceUsage()
-				if err != nil {
-					log.Error(err, "pid", worker.Pid(), "mediasoup Worker resource usage")
-					continue
-				}
-				log.Info("pid", worker.Pid(), "usage", usage, "mediasoup Worker resource usage")
-			}
+	workers := []*mediasoup.Worker{}
+	for i := 0; i < internal.DefaultConfig.Mediasoup.NumWorkers/2; i++ {
+		worker, err := mediasoup.NewWorker(
+			mediasoup.WithLogLevel(config.Mediasoup.WorkerSettings.LogLevel),
+			mediasoup.WithLogTags(config.Mediasoup.WorkerSettings.LogTags),
+			mediasoup.WithRtcMinPort(config.Mediasoup.WorkerSettings.RtcMinPort),
+			mediasoup.WithRtcMaxPort(config.Mediasoup.WorkerSettings.RtcMaxPort),
+		)
+		if err != nil {
+			panic(err)
 		}
-	}()
+		worker.On("died", func(err error) {
+			log.Error("[Error: %v] exiting in 2 second ...", err)
+			time.AfterFunc(2*time.Second, func() {
+				os.Exit(1)
+			})
+		})
+		go func() {
+			ticker := time.NewTicker(120 * time.Second)
+			for {
+				select {
+				case <-ticker.C:
+					usage, err := worker.GetResourceUsage()
+					if err != nil {
+						log.Error(err, "pid", worker.Pid(), "mediasoup Worker resource usage")
+						continue
+					}
+					log.Debug("pid", worker.Pid(), "usage", usage, "mediasoup Worker resource usage")
+				}
+			}
+		}()
+		workers = append(workers, worker)
+	}
 
 	return &ws{
 		Logger:          logger,
 		config:          config,
-		mediasoupWorker: worker,
+		mediasoupWorker: workers,
 	}
 }
 
@@ -111,7 +113,7 @@ func (h *ws) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	roomId := query.Get("roomId")
 	if roomId == "" {
-		log.Info("connection request without roomId")
+		log.Debug("connection request without roomId")
 		http.Error(w, "RoomID and ", http.StatusUnauthorized)
 		return
 	}
@@ -126,13 +128,13 @@ func (h *ws) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	// upgrader.CheckOrigin = func(r *http.Request) bool { log.Info(r.URL.String()); return true }
 	if err != nil {
-		log.Info("upgrade:", err)
+		log.Error("upgrade:", err)
 		return
 	}
 	defer conn.Close()
 
 	transport := internal.NewWebsocketTransport(conn)
-	log.Infof("connection request [roomId: %s, peerId: %s]", roomId, peerId)
+	log.Debugf("connection request [roomId: %s, peerId: %s]", roomId, peerId)
 
 	peerID, err := uuid.FromString(peerId)
 	if err != nil {
