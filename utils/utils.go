@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net"
 	"strconv"
 	"strings"
 	"time"
@@ -138,4 +139,11 @@ func LoadTLSCredentials(PublicCertPath, PrivateCertPath string) *tls.Config {
 		// RootCAs:      certPool,
 	}
 	return config
+}
+
+// Get free port
+func GetFreePort() string {
+	l, _ := net.Listen("tcp", "")
+	defer l.Close()
+	return l.Addr().String()
 }

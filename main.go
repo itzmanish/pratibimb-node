@@ -9,6 +9,7 @@ import (
 	"github.com/itzmanish/pratibimb-go/handler"
 	"github.com/itzmanish/pratibimb-go/internal"
 	v1 "github.com/itzmanish/pratibimb-go/proto/gen/node/v1"
+	"github.com/itzmanish/pratibimb-go/utils"
 	"github.com/jiyeyuran/mediasoup-go"
 	"github.com/joho/godotenv"
 
@@ -22,8 +23,9 @@ import (
 const (
 	serviceName    = "com.itzmanish.pratibimb.node.v1"
 	serviceVersion = "1.0.0"
-	serviceAddress = ":0"
 )
+
+var serviceAddress = utils.GetFreePort()
 
 func init() {
 	// loads values from .env into the system
@@ -45,8 +47,6 @@ func main() {
 
 	router := mux.NewRouter()
 
-	api := httpapi.NewServer(serviceAddress)
-
 	log.Debugf("webrtc announce ip: %v", internal.DefaultConfig.Mediasoup.WebRtcTransportOptions.ListenIps)
 
 	// register call handler
@@ -56,9 +56,11 @@ func main() {
 	// router.Handle("/v1/room", middleware.AuthWrapper()(handler.CreateRoom))
 	router.Handle("/v1/ws", wshandler)
 
-	nodeHandler := handler.NewNodeService("")
+	api := httpapi.NewServer(serviceAddress)
 
 	api.Init(server.EnableCORS(true))
+
+	nodeHandler := handler.NewNodeService(serviceAddress)
 
 	service.Init(micro.AfterStart(func() error {
 		log.Debug("After start executing")

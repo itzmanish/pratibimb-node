@@ -9,12 +9,13 @@ import (
 )
 
 type NodeService struct {
-	ID string
+	ID         string
+	wsEndpoint string
 }
 
-func NewNodeService(id string) *NodeService {
+func NewNodeService(ep string) *NodeService {
 	return &NodeService{
-		ID: id,
+		wsEndpoint: ep,
 	}
 }
 
@@ -43,6 +44,7 @@ func (service *NodeService) CreateNodeRoom(ctx context.Context, in *v1.CreateNod
 
 	out.Message = "Room created."
 	out.Status = "success"
-	out.NodeId = ""
+	out.NodeId = service.ID
+	out.WsEndpoint = service.wsEndpoint
 	return nil
 }
