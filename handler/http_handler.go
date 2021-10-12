@@ -19,11 +19,11 @@ import (
 type ws struct {
 	sync.RWMutex
 	log.Logger
-	config                 internal.Config
-	rooms                  sync.Map
-	mediasoupWorker        []*mediasoup.Worker
-	nextMediasoupWorkerIdx int
+	config internal.Config
 }
+
+var rooms sync.Map
+var mediasoupWorker []*mediasoup.Worker
 
 var upgrader = &websocket.Upgrader{
 	ReadBufferSize:  1024,
@@ -32,17 +32,11 @@ var upgrader = &websocket.Upgrader{
 	CheckOrigin:     func(r *http.Request) bool { return true },
 }
 
-type indexHandler struct{}
-
-func NewIndexHandler() *indexHandler {
-	return &indexHandler{}
-}
-
 func NewWsHandler(config internal.Config, c client.Client) *ws {
 	logger := log.NewLogger(log.WithFields(map[string]interface{}{"caller": "WS Handler"}))
 
 	workers := []*mediasoup.Worker{}
-	for i := 0; i < internal.DefaultConfig.Mediasoup.NumWorkers; i++ {
+	for i := 0; i < internal.DefaultConfig.Mediasoup.NumWorkers/4; i++ {
 		worker, err := mediasoup.NewWorker(
 			mediasoup.WithLogLevel(config.Mediasoup.WorkerSettings.LogLevel),
 			mediasoup.WithLogTags(config.Mediasoup.WorkerSettings.LogTags),
@@ -75,14 +69,15 @@ func NewWsHandler(config internal.Config, c client.Client) *ws {
 		workers = append(workers, worker)
 	}
 
+	mediasoupWorker = workers
+
 	return &ws{
-		Logger:          logger,
-		config:          config,
-		mediasoupWorker: workers,
+		Logger: logger,
+		config: config,
 	}
 }
 
-func (*indexHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func IndexHandler(w http.ResponseWriter, r *http.Request) {
 	// decode the incoming request as json
 	// var request map[string]interface{}
 	// if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
@@ -176,7 +171,7 @@ func (h *ws) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ws) getOrCreateRoom(r *http.Request, roomId string, secret int32) (room *internal.Room, err error) {
-	val, ok := h.rooms.Load(roomId)
+	val, ok := rooms.Load(roomId)
 	if ok {
 		room := val.(*internal.Room)
 		if room.ValidSecret(secret) {
@@ -184,16 +179,16 @@ func (h *ws) getOrCreateRoom(r *http.Request, roomId string, secret int32) (room
 		}
 		return nil, internal.ErrInvalidSecret
 	} else {
-		room, err = internal.NewRoom(h.mediasoupWorker, roomId, secret)
+		room, err = internal.NewRoom(mediasoupWorker, roomId, secret)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	h.rooms.Store(roomId, room)
+	rooms.Store(roomId, room)
 
 	room.On("close", func() {
-		h.rooms.Delete(roomId)
+		rooms.Delete(roomId)
 		room.RemoveAllListeners()
 	})
 
