@@ -11,7 +11,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/itzmanish/go-micro/v2/client"
 	log "github.com/itzmanish/go-micro/v2/logger"
-	"github.com/itzmanish/pratibimb-go/internal"
+	"github.com/itzmanish/pratibimb-node/internal"
 	"github.com/jiyeyuran/mediasoup-go"
 	uuid "github.com/satori/go.uuid"
 )

@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"github.com/itzmanish/go-micro/v2/errors"
-	"github.com/itzmanish/pratibimb-go/internal"
-	v1 "github.com/itzmanish/pratibimb-go/proto/gen/node/v1"
+	"github.com/itzmanish/pratibimb-node/internal"
+	v1 "github.com/itzmanish/pratibimb-node/proto/gen/node/v1"
 )
 
 type NodeService struct {

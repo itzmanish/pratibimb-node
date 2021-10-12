@@ -6,10 +6,10 @@ import (
 	"strings"
 
 	"github.com/gorilla/mux"
-	"github.com/itzmanish/pratibimb-go/handler"
-	"github.com/itzmanish/pratibimb-go/internal"
-	v1 "github.com/itzmanish/pratibimb-go/proto/gen/node/v1"
-	"github.com/itzmanish/pratibimb-go/utils"
+	"github.com/itzmanish/pratibimb-node/handler"
+	"github.com/itzmanish/pratibimb-node/internal"
+	v1 "github.com/itzmanish/pratibimb-node/proto/gen/node/v1"
+	"github.com/itzmanish/pratibimb-node/utils"
 	"github.com/jiyeyuran/mediasoup-go"
 	"github.com/joho/godotenv"
 

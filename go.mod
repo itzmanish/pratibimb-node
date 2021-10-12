@@ -1,4 +1,4 @@
-module github.com/itzmanish/pratibimb-go
+module github.com/itzmanish/pratibimb-node
 
 go 1.16
 
