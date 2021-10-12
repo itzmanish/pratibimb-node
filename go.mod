@@ -4,12 +4,13 @@ go 1.16
 
 replace (
 	github.com/coreos/etcd => github.com/ozonru/etcd v3.3.20-grpc1.27-origmodule+incompatible
-	google.golang.org/grpc => google.golang.org/grpc v1.27.0
 	github.com/jiyeyuran/mediasoup-go => ../mediasoup-go
+	google.golang.org/grpc => google.golang.org/grpc v1.27.0
 )
 
 require (
 	github.com/golang/protobuf v1.5.2
+	github.com/gorilla/mux v1.7.3
 	github.com/gorilla/websocket v1.4.2
 	github.com/hashicorp/consul/api v1.11.0
 	github.com/itzmanish/go-micro-plugins/registry/consul/v2 v2.10.0
@@ -21,4 +22,6 @@ require (
 	github.com/satori/go.uuid v1.2.0
 	github.com/twilio/twilio-go v0.15.0
 	golang.org/x/crypto v0.0.0-20201221181555-eec23a3978ad
+	google.golang.org/genproto v0.0.0-20200526211855-cb27e3aa2013
+	google.golang.org/protobuf v1.26.0
 )

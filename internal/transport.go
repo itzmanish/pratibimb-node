@@ -51,14 +51,14 @@ func (t *WebsocketTransport) Send(message []byte) error {
 }
 
 func (t *WebsocketTransport) Close() {
-	t.locker.Lock()
-	defer t.locker.Unlock()
-
 	if t.closed {
 		return
 	}
 
 	t.logger.Log(logger.ErrorLevel, "close()", "conn", t.String())
+
+	t.locker.Lock()
+	defer t.locker.Unlock()
 
 	t.closed = true
 	t.conn.Close()

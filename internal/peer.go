@@ -105,19 +105,6 @@ func (p *Peer) Close() {
 	p.SafeEmit("close")
 }
 
-func (p *Peer) handlePeer() {
-
-	if p.transport != nil {
-		p.transport.On("disconnect", func() {
-			if p.Closed() {
-				return
-			}
-			p.logger.Logf(log.DebugLevel, "disconnect event [id:%s]", p.GetID())
-			p.Close()
-		})
-	}
-}
-
 func (p *Peer) GetID() string {
 	return p.ID.String()
 }
@@ -383,6 +370,10 @@ func (peer *Peer) handleTransport() {
 		peer.Close()
 		return
 	}
+
+	peer.transport.On("disconnect", func() {
+		peer.Close()
+	})
 
 	peer.transport.On("close", func() {
 		peer.Close()

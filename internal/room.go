@@ -1611,8 +1611,13 @@ func (r *Room) pipeProducersToRouter(router *mediasoup.Router, excludePeer ...*P
 	for _, peer := range peersToPipe {
 		srcRouter := r.Routers[peer.GetRouterID()]
 		for producerId := range peer.GetProducers() {
-			rProducers := router.GetProducers()
-			if _, ok := rProducers.Load(producerId); ok {
+			routerHasProducer := false
+			for _, prod := range router.Producers() {
+				if prod.Id() == producerId {
+					routerHasProducer = true
+				}
+			}
+			if routerHasProducer {
 				continue
 			}
 			srcRouter.PipeToRouter(mediasoup.PipeToRouterOptions{
