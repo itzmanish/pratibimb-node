@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package go.pratibimb.sfu;
+
+import "google/api/annotations.proto";
+
+option go_package="node/v1";
+
+service NodeService {
+  rpc CreateNodeRoom(CreateNodeRoomRequest) returns (CreateNodeRoomResponse) {
+    option (google.api.http) = {
+      post: "/v1/room"
+      body: "id,secret"
+    };
+  }
+}
+
+message CreateNodeRoomRequest {
+    string id = 1;
+    int32 secret = 2;
+}
+
+message CreateNodeRoomResponse {
+    string status = 1;
+    string message = 2;
+    string node_id = 3;
+    string ws_endpoint = 4;
+}

@@ -1,0 +1,8 @@
+version: v1
+managed:
+  enabled: true
+plugins:
+  - name: micro
+    out: gen
+  - name: go
+    out: gen
