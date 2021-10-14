@@ -50,7 +50,7 @@ func main() {
 	log.Debugf("webrtc announce ip: %v", internal.DefaultConfig.Mediasoup.WebRtcTransportOptions.ListenIps)
 
 	// register call handler
-	wshandler := handler.NewWsHandler(internal.DefaultConfig, service.Options().Client)
+	wshandler := handler.NewWsHandler(internal.DefaultConfig)
 
 	router.HandleFunc("/", handler.IndexHandler)
 	// router.Handle("/v1/room", middleware.AuthWrapper()(handler.CreateRoom))

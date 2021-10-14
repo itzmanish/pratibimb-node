@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/itzmanish/go-micro/v2/client"
 	log "github.com/itzmanish/go-micro/v2/logger"
 	"github.com/itzmanish/pratibimb-node/internal"
 	"github.com/jiyeyuran/mediasoup-go"
@@ -32,7 +31,7 @@ var upgrader = &websocket.Upgrader{
 	CheckOrigin:     func(r *http.Request) bool { return true },
 }
 
-func NewWsHandler(config internal.Config, c client.Client) *ws {
+func NewWsHandler(config internal.Config) *ws {
 	logger := log.NewLogger(log.WithFields(map[string]interface{}{"caller": "WS Handler"}))
 
 	workers := []*mediasoup.Worker{}
@@ -78,12 +77,6 @@ func NewWsHandler(config internal.Config, c client.Client) *ws {
 }
 
 func IndexHandler(w http.ResponseWriter, r *http.Request) {
-	// decode the incoming request as json
-	// var request map[string]interface{}
-	// if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-	// 	http.Error(w, err.Error(), 500)
-	// 	return
-	// }
 
 	// we want to augment the response
 	response := map[string]interface{}{
