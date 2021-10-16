@@ -28,6 +28,7 @@ const (
 )
 
 var serviceAddress = utils.GetFreePort()
+var publicAddressWithPort = utils.GetPublicAddressWithPort(serviceAddress)
 
 func init() {
 	// loads values from .env into the system
@@ -49,7 +50,13 @@ func main() {
 
 	wsService := httpServer.NewServer(server.Name(wsServiceName),
 		server.Version(wsServiceVersion),
+		server.Address(serviceAddress),
 	)
+
+	if os.Getenv("ENV") != "production" {
+		publicAddressWithPort = utils.GetFreePortWithHost(serviceAddress)
+	}
+
 	mux := http.NewServeMux()
 
 	log.Debugf("webrtc announce ip: %v", internal.DefaultConfig.Mediasoup.WebRtcTransportOptions.ListenIps)
@@ -61,24 +68,26 @@ func main() {
 	// router.Handle("/v1/room", middleware.AuthWrapper()(handler.CreateRoom))
 	mux.Handle("/v1/ws", wshandler)
 
-	nodeHandler := handler.NewNodeService(serviceAddress)
+	nodeHandler := handler.NewNodeService()
 
-	service.Init(micro.AfterStart(func() error {
-		log.Debug("After start executing")
-		srvs, err := registry.GetService(serviceName)
-		if err != nil {
-			return err
-		}
+	service.Init(
+		micro.Metadata(map[string]string{"ws_address": publicAddressWithPort}),
+		micro.AfterStart(func() error {
+			log.Debug("After start executing")
+			srvs, err := registry.GetService(serviceName)
+			if err != nil {
+				return err
+			}
 
-		for _, srv := range srvs {
-			for _, node := range srv.Nodes {
-				if strings.Split(node.Address, ":")[1] == strings.Split(service.Server().Options().Address, ":")[3] {
-					nodeHandler.Init(node.Id)
+			for _, srv := range srvs {
+				for _, node := range srv.Nodes {
+					if strings.Split(node.Address, ":")[1] == strings.Split(service.Server().Options().Address, ":")[3] {
+						nodeHandler.Init(node.Id, publicAddressWithPort)
+					}
 				}
 			}
-		}
-		return nil
-	}))
+			return nil
+		}))
 
 	if err := v1.RegisterNodeServiceHandler(service.Server(), nodeHandler); err != nil {
 		log.Fatal(err)

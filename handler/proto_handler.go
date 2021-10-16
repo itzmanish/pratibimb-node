@@ -13,14 +13,13 @@ type NodeService struct {
 	wsEndpoint string
 }
 
-func NewNodeService(ep string) *NodeService {
-	return &NodeService{
-		wsEndpoint: ep,
-	}
+func NewNodeService() *NodeService {
+	return &NodeService{}
 }
 
-func (service *NodeService) Init(id string) {
+func (service *NodeService) Init(id string, wsEp string) {
 	service.ID = id
+	service.wsEndpoint = wsEp
 }
 
 func (service *NodeService) CreateNodeRoom(ctx context.Context, in *v1.CreateNodeRoomRequest, out *v1.CreateNodeRoomResponse) error {

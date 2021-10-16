@@ -9,11 +9,13 @@ import (
 	"io/ioutil"
 	"log"
 	"net"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/itzmanish/go-micro/v2/logger"
+	"github.com/itzmanish/go-micro/v2/util/addr"
 	"golang.org/x/crypto/argon2"
 )
 
@@ -142,8 +144,47 @@ func LoadTLSCredentials(PublicCertPath, PrivateCertPath string) *tls.Config {
 }
 
 // Get free port
+func GetFreePortWithHost(address string) string {
+	host := ""
+	port := 0
+	parts := strings.Split(address, ":")
+	if len(parts) > 1 {
+		host = strings.Join(parts[:len(parts)-1], ":")
+		port, _ = strconv.Atoi(parts[len(parts)-1])
+	} else {
+		host = parts[0]
+	}
+
+	address, err := addr.Extract(host)
+	if err != nil {
+		address = host
+	}
+	return fmt.Sprintf("%s:%d", address, port)
+}
+
 func GetFreePort() string {
 	l, _ := net.Listen("tcp", "")
 	defer l.Close()
 	return l.Addr().String()
+}
+
+func GetPublicAddressWithPort(address string) string {
+	res, err := http.Get("http://ifconfig.me")
+	if err != nil {
+		return GetFreePortWithHost(address)
+	}
+	defer res.Body.Close()
+	ip, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return GetFreePortWithHost(address)
+	}
+	parts := strings.Split(address, ":")
+	host := string(ip)
+	port := 0
+	if len(parts) > 1 {
+		port, _ = strconv.Atoi(parts[len(parts)-1])
+	} else {
+		return GetFreePortWithHost(address)
+	}
+	return fmt.Sprintf("%s:%d", host, port)
 }
