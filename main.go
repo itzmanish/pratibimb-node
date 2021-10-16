@@ -2,10 +2,10 @@ package main
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 
-	"github.com/gorilla/mux"
 	"github.com/itzmanish/pratibimb-node/handler"
 	"github.com/itzmanish/pratibimb-node/internal"
 	v1 "github.com/itzmanish/pratibimb-node/proto/gen/node/v1"
@@ -14,15 +14,17 @@ import (
 	"github.com/joho/godotenv"
 
 	"github.com/itzmanish/go-micro/v2"
-	"github.com/itzmanish/go-micro/v2/api/server"
-	httpapi "github.com/itzmanish/go-micro/v2/api/server/http"
 	log "github.com/itzmanish/go-micro/v2/logger"
 	"github.com/itzmanish/go-micro/v2/registry"
+	"github.com/itzmanish/go-micro/v2/server"
+	httpServer "github.com/itzmanish/go-micro/v2/server/http"
 )
 
 const (
-	serviceName    = "com.itzmanish.pratibimb.node.v1"
-	serviceVersion = "1.0.0"
+	wsServiceName    = "github.itzmanish.service.pratibimb.node.ws.v1"
+	wsServiceVersion = "1.0.0"
+	serviceName      = "github.itzmanish.service.pratibimb.node.v1"
+	serviceVersion   = "1.0.0"
 )
 
 var serviceAddress = utils.GetFreePort()
@@ -45,20 +47,19 @@ func main() {
 		micro.Version(serviceVersion),
 	)
 
-	router := mux.NewRouter()
+	wsService := httpServer.NewServer(server.Name(wsServiceName),
+		server.Version(wsServiceVersion),
+	)
+	mux := http.NewServeMux()
 
 	log.Debugf("webrtc announce ip: %v", internal.DefaultConfig.Mediasoup.WebRtcTransportOptions.ListenIps)
 
 	// register call handler
 	wshandler := handler.NewWsHandler(internal.DefaultConfig)
 
-	router.HandleFunc("/", handler.IndexHandler)
+	mux.HandleFunc("/", handler.IndexHandler)
 	// router.Handle("/v1/room", middleware.AuthWrapper()(handler.CreateRoom))
-	router.Handle("/v1/ws", wshandler)
-
-	api := httpapi.NewServer(serviceAddress)
-
-	api.Init(server.EnableCORS(true))
+	mux.Handle("/v1/ws", wshandler)
 
 	nodeHandler := handler.NewNodeService(serviceAddress)
 
@@ -83,10 +84,11 @@ func main() {
 		log.Fatal(err)
 	}
 
-	api.Handle("/", router)
+	wsServerHandler := wsService.NewHandler(mux)
+	wsService.Handle(wsServerHandler)
 
 	// Start API
-	if err := api.Start(); err != nil {
+	if err := wsService.Start(); err != nil {
 		log.Fatal(err)
 	}
 
@@ -96,7 +98,7 @@ func main() {
 	}
 
 	// Stop API
-	if err := api.Stop(); err != nil {
+	if err := wsService.Stop(); err != nil {
 		log.Fatal(err)
 	}
 }

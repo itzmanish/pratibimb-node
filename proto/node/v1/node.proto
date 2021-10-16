@@ -2,17 +2,10 @@ syntax = "proto3";
 
 package node.v1;
 
-import "google/api/annotations.proto";
-
 option go_package="node/v1";
 
 service NodeService {
-  rpc CreateNodeRoom(CreateNodeRoomRequest) returns (CreateNodeRoomResponse) {
-    option (google.api.http) = {
-      post: "/v1/room"
-      body: "id,secret"
-    };
-  }
+  rpc CreateNodeRoom(CreateNodeRoomRequest) returns (CreateNodeRoomResponse) {}
 }
 
 message CreateNodeRoomRequest {

@@ -5,7 +5,6 @@ package v1
 
 import (
 	fmt "fmt"
-	_ "google.golang.org/genproto/googleapis/api/annotations"
 	proto "google.golang.org/protobuf/proto"
 	math "math"
 )
@@ -31,15 +30,7 @@ var _ server.Option
 // Api Endpoints for NodeService service
 
 func NewNodeServiceEndpoints() []*api.Endpoint {
-	return []*api.Endpoint{
-		{
-			Name:    "NodeService.CreateNodeRoom",
-			Path:    []string{"/v1/room"},
-			Method:  []string{"POST"},
-			Body:    "id,secret",
-			Handler: "rpc",
-		},
-	}
+	return []*api.Endpoint{}
 }
 
 // Client API for NodeService service
@@ -84,13 +75,6 @@ func RegisterNodeServiceHandler(s server.Server, hdlr NodeServiceHandler, opts .
 		nodeService
 	}
 	h := &nodeServiceHandler{hdlr}
-	opts = append(opts, api.WithEndpoint(&api.Endpoint{
-		Name:    "NodeService.CreateNodeRoom",
-		Path:    []string{"/v1/room"},
-		Method:  []string{"POST"},
-		Body:    "id,secret",
-		Handler: "rpc",
-	}))
 	return s.Handle(s.NewHandler(&NodeService{h}, opts...))
 }
 

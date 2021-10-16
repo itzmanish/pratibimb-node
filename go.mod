@@ -6,6 +6,7 @@ replace (
 	github.com/coreos/etcd => github.com/ozonru/etcd v3.3.20-grpc1.27-origmodule+incompatible
 	github.com/jiyeyuran/mediasoup-go => ../mediasoup-go
 	google.golang.org/grpc => google.golang.org/grpc v1.27.0
+	github.com/itzmanish/go-micro/v2 => ../go-micro
 )
 
 require (
