@@ -7,6 +7,7 @@ replace (
 	github.com/jiyeyuran/mediasoup-go => ../mediasoup-go
 	google.golang.org/grpc => google.golang.org/grpc v1.27.0
 	github.com/itzmanish/go-micro/v2 => ../go-micro
+	github.com/itzmanish/pratibimb-go => ../pratibimb-go
 )
 
 require (

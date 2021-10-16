@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -9,16 +10,25 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/itzmanish/go-micro/v2"
 	log "github.com/itzmanish/go-micro/v2/logger"
 	"github.com/itzmanish/pratibimb-node/internal"
+	v1 "github.com/itzmanish/pratibimb-node/proto/gen/node/v1"
 	"github.com/jiyeyuran/mediasoup-go"
 	uuid "github.com/satori/go.uuid"
 )
+
+type RoomUpdateRequest struct {
+	RoomID   string `json:"room_id"`
+	PeerName string `json:"peer_name"`
+	PeerID   string `json:"peer_id"`
+}
 
 type ws struct {
 	sync.RWMutex
 	log.Logger
 	config internal.Config
+	event  micro.Event
 }
 
 var rooms sync.Map
@@ -31,7 +41,7 @@ var upgrader = &websocket.Upgrader{
 	CheckOrigin:     func(r *http.Request) bool { return true },
 }
 
-func NewWsHandler(config internal.Config) *ws {
+func NewWsHandler(config internal.Config, event micro.Event) *ws {
 	logger := log.NewLogger(log.WithFields(map[string]interface{}{"caller": "WS Handler"}))
 
 	workers := []*mediasoup.Worker{}
@@ -53,16 +63,13 @@ func NewWsHandler(config internal.Config) *ws {
 		})
 		go func() {
 			ticker := time.NewTicker(120 * time.Second)
-			for {
-				select {
-				case <-ticker.C:
-					usage, err := worker.GetResourceUsage()
-					if err != nil {
-						log.Error(err, "pid", worker.Pid(), "mediasoup Worker resource usage")
-						continue
-					}
-					log.Debug("pid", worker.Pid(), "usage", usage, "mediasoup Worker resource usage")
+			for range ticker.C {
+				usage, err := worker.GetResourceUsage()
+				if err != nil {
+					log.Error(err, "pid", worker.Pid(), "mediasoup Worker resource usage")
+					continue
 				}
+				log.Debug("pid", worker.Pid(), "usage", usage, "mediasoup Worker resource usage")
 			}
 		}()
 		workers = append(workers, worker)
@@ -73,6 +80,7 @@ func NewWsHandler(config internal.Config) *ws {
 	return &ws{
 		Logger: logger,
 		config: config,
+		event:  event,
 	}
 }
 
@@ -130,9 +138,9 @@ func (h *ws) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	room, err := h.getOrCreateRoom(r, roomId, int32(secret))
+	room, err := h.getRoom(r, roomId, int32(secret))
 	if err != nil {
-		h.Logger.Log(log.ErrorLevel, err, "getOrCreateRoom")
+		h.Logger.Log(log.ErrorLevel, err, "getRoom")
 		msg := internal.CreateErrorNotification("ERROR_BEFORE_CLOSING", err)
 		transport.Send(msg.Marshal())
 		return
@@ -156,34 +164,37 @@ func (h *ws) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	room.HandlePeer(peer, returning)
-
+	data := &RoomUpdateRequest{
+		RoomID:   roomId,
+		PeerName: peer.Name,
+		PeerID:   peerId,
+	}
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		log.Error(err)
+	}
+	err = h.event.Publish(context.TODO(), &v1.Message{Cmd: "add_peer", Data: jsonData})
+	if err != nil {
+		log.Error(err)
+	}
 	if err := transport.Run(); err != nil {
 		h.Logger.Log(log.ErrorLevel, err, "transport.run")
 		transport.Close()
 	}
+	err = h.event.Publish(context.TODO(), &v1.Message{Cmd: "remove_peer", Data: jsonData})
+	if err != nil {
+		log.Error(err)
+	}
 }
 
-func (h *ws) getOrCreateRoom(r *http.Request, roomId string, secret int32) (room *internal.Room, err error) {
+func (h *ws) getRoom(r *http.Request, roomId string, secret int32) (*internal.Room, error) {
 	val, ok := rooms.Load(roomId)
-	if ok {
-		room := val.(*internal.Room)
-		if room.ValidSecret(secret) {
-			return room, nil
-		}
-		return nil, internal.ErrInvalidSecret
-	} else {
-		room, err = internal.NewRoom(mediasoupWorker, roomId, secret)
-		if err != nil {
-			return nil, err
-		}
+	if !ok {
+		return nil, internal.ErrRoomNotExist
 	}
-
-	rooms.Store(roomId, room)
-
-	room.On("close", func() {
-		rooms.Delete(roomId)
-		room.RemoveAllListeners()
-	})
-
-	return
+	room := val.(*internal.Room)
+	if !room.ValidSecret(secret) {
+		return nil, internal.ErrInvalidSecret
+	}
+	return room, nil
 }

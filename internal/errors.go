@@ -8,6 +8,7 @@ import (
 
 var (
 	ErrInvalidSecret = errors.Unauthorized("ROOM_UNAUTHORIZED", "Invalid secret for given room")
+	ErrRoomNotExist  = errors.NotFound("ROOM_NOT_EXIST", "Room does not exist")
 	ErrMethodUnknown = errors.BadRequest("UNKNOWN_METHOD", "Method is unknown!")
 	ErrPeerNotJoined = errors.NotFound("PEER_NOT_JOINED", "Peer not joined")
 	ErrPeerNotFound  = func(id string) error {

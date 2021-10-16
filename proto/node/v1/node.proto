@@ -6,6 +6,19 @@ option go_package="node/v1";
 
 service NodeService {
   rpc CreateNodeRoom(CreateNodeRoomRequest) returns (CreateNodeRoomResponse) {}
+  rpc Health (HealthRequest) returns (HealthResponse){};
+}
+
+message Message {
+  string cmd = 1;
+  bytes data = 2;
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+	string status = 1;
+	string message = 2;
 }
 
 message CreateNodeRoomRequest {

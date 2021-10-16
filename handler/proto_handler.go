@@ -3,23 +3,34 @@ package handler
 import (
 	"context"
 
+	"github.com/itzmanish/go-micro/v2"
 	"github.com/itzmanish/go-micro/v2/errors"
+	"github.com/itzmanish/go-micro/v2/logger"
 	"github.com/itzmanish/pratibimb-node/internal"
 	v1 "github.com/itzmanish/pratibimb-node/proto/gen/node/v1"
 )
 
 type NodeService struct {
 	ID         string
+	event      micro.Event
 	wsEndpoint string
 }
 
-func NewNodeService() *NodeService {
-	return &NodeService{}
+func NewNodeService(ev micro.Event) *NodeService {
+	return &NodeService{
+		event: ev,
+	}
 }
 
 func (service *NodeService) Init(id string, wsEp string) {
 	service.ID = id
 	service.wsEndpoint = wsEp
+}
+func (service *NodeService) Health(ctx context.Context, in *v1.HealthRequest, out *v1.HealthResponse) error {
+	logger.Debug("Health request called")
+	out.Status = "ok"
+	out.Message = "service is up."
+	return nil
 }
 
 func (service *NodeService) CreateNodeRoom(ctx context.Context, in *v1.CreateNodeRoomRequest, out *v1.CreateNodeRoomResponse) error {

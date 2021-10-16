@@ -37,6 +37,7 @@ func NewNodeServiceEndpoints() []*api.Endpoint {
 
 type NodeService interface {
 	CreateNodeRoom(ctx context.Context, in *CreateNodeRoomRequest, opts ...client.CallOption) (*CreateNodeRoomResponse, error)
+	Health(ctx context.Context, in *HealthRequest, opts ...client.CallOption) (*HealthResponse, error)
 }
 
 type nodeService struct {
@@ -61,15 +62,27 @@ func (c *nodeService) CreateNodeRoom(ctx context.Context, in *CreateNodeRoomRequ
 	return out, nil
 }
 
+func (c *nodeService) Health(ctx context.Context, in *HealthRequest, opts ...client.CallOption) (*HealthResponse, error) {
+	req := c.c.NewRequest(c.name, "NodeService.Health", in)
+	out := new(HealthResponse)
+	err := c.c.Call(ctx, req, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // Server API for NodeService service
 
 type NodeServiceHandler interface {
 	CreateNodeRoom(context.Context, *CreateNodeRoomRequest, *CreateNodeRoomResponse) error
+	Health(context.Context, *HealthRequest, *HealthResponse) error
 }
 
 func RegisterNodeServiceHandler(s server.Server, hdlr NodeServiceHandler, opts ...server.HandlerOption) error {
 	type nodeService interface {
 		CreateNodeRoom(ctx context.Context, in *CreateNodeRoomRequest, out *CreateNodeRoomResponse) error
+		Health(ctx context.Context, in *HealthRequest, out *HealthResponse) error
 	}
 	type NodeService struct {
 		nodeService
@@ -84,4 +97,8 @@ type nodeServiceHandler struct {
 
 func (h *nodeServiceHandler) CreateNodeRoom(ctx context.Context, in *CreateNodeRoomRequest, out *CreateNodeRoomResponse) error {
 	return h.NodeServiceHandler.CreateNodeRoom(ctx, in, out)
+}
+
+func (h *nodeServiceHandler) Health(ctx context.Context, in *HealthRequest, out *HealthResponse) error {
+	return h.NodeServiceHandler.Health(ctx, in, out)
 }

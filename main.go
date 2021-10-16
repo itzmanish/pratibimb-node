@@ -61,14 +61,15 @@ func main() {
 
 	log.Debugf("webrtc announce ip: %v", internal.DefaultConfig.Mediasoup.WebRtcTransportOptions.ListenIps)
 
+	pratibimbEventPublisher := micro.NewEvent("github.itzmanish.service.pratibimb.v1", service.Client())
 	// register call handler
-	wshandler := handler.NewWsHandler(internal.DefaultConfig)
+	wshandler := handler.NewWsHandler(internal.DefaultConfig, pratibimbEventPublisher)
 
 	mux.HandleFunc("/", handler.IndexHandler)
 	// router.Handle("/v1/room", middleware.AuthWrapper()(handler.CreateRoom))
 	mux.Handle("/v1/ws", wshandler)
 
-	nodeHandler := handler.NewNodeService()
+	nodeHandler := handler.NewNodeService(pratibimbEventPublisher)
 
 	service.Init(
 		micro.Metadata(map[string]string{"ws_address": publicAddressWithPort}),
