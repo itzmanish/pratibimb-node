@@ -5,13 +5,31 @@ package node.v1;
 option go_package="node/v1";
 
 service NodeService {
-  rpc CreateNodeRoom(CreateNodeRoomRequest) returns (CreateNodeRoomResponse) {}
   rpc Health (HealthRequest) returns (HealthResponse){};
+
+  // Actual rpc methods for creating peers
+  rpc CreatePeer (CreatePeerRequest) returns (CreatePeerResponse) {};
+  rpc ClosePeer (ClosePeerRequest) returns (ClosePeerResponse);
+  rpc GetRouterCapabilities (GetRouterCapabilitiesRequest) returns (GetRouterCapabilitiesResponse);
+  rpc Join (JoinPeerRequest) returns (JoinPeerResponse){};
+  rpc CreateWebRtcTransport (CreateWebRtcTransportRequest) returns (CreateWebRtcTransportResponse);
+  rpc ConnectWebRtcTransport (ConnectWebRtcTransportRequest) returns (ConnectWebRtcTransportResponse);
+  rpc RestartIce (RestartIceRequest) returns (RestartIceResponse);
+  rpc Produce (ProduceRequest) returns (ProduceResponse);
+  // producer action will have pause/resume/close actions.
+  rpc ProducerAction (ProducerActionRequest) returns (ProducerActionResponse);
+  rpc Consume (ConsumeRequest) returns (ConsumeResponse);
+  // consumer action will have pause/resume/close actions.
+  rpc ConsumerAction (ConsumerActionRequest) returns (ConsumerActionResponse);
+  // Get stats of transport/consumer/producer
+  rpc GetStats (GetStatsRequest) returns (GetStatsResponse);
 }
 
 message Message {
-  string cmd = 1;
-  bytes data = 2;
+  string sub = 1;
+  bytes payload = 2;
+  string room_id = 3;
+  string peer_id = 4;
 }
 
 message HealthRequest {}
@@ -21,14 +39,158 @@ message HealthResponse {
 	string message = 2;
 }
 
-message CreateNodeRoomRequest {
-    string id = 1;
-    int32 secret = 2;
+message NodeMessage {
+    uint32 id = 1;
+    uint32 cid = 2;
+    string status = 3;
+    string method = 4;
+    string data_type = 5;
+    bytes data = 6;
+    Error error = 7;
 }
 
-message CreateNodeRoomResponse {
-    string status = 1;
-    string message = 2;
-    string node_id = 3;
-    string ws_endpoint = 4;
+message Error {
+  string id = 1;
+  int32 code = 2;
+  string detail = 3;
+  string status = 4;
+}
+
+message BasicInfo {
+  string room_id = 1;
+  string peer_id = 2;
+}
+
+message CreatePeerRequest {
+  BasicInfo base_info = 1;
+  string room_name = 2;
+  int32 secret = 3;
+}
+
+message CreatePeerResponse {
+
+}
+
+message ClosePeerRequest {
+  BasicInfo base_info = 1;
+}
+
+message ClosePeerResponse {
+
+}
+
+message GetRouterCapabilitiesRequest {
+  BasicInfo base_info = 1;
+}
+
+message GetRouterCapabilitiesResponse {
+  bytes router_capabilities = 1;
+}
+
+message JoinPeerRequest {
+  BasicInfo base_info = 1;
+  bytes rtp_capabilities = 2;
+}
+
+message JoinPeerResponse {
+
+}
+
+message CreateWebRtcTransportRequest {
+  BasicInfo base_info = 1;
+  bool force_tcp = 2;
+  bool producing = 3;
+  bool consuming = 4;
+  bytes sctp_capabilities = 5;
+}
+message CreateWebRtcTransportResponse {
+  string transport_id = 1;
+  bytes ice_parameters = 2;
+  bytes ice_candidates = 3;
+  bytes dtls_parameters = 4;
+  bytes sctp_parameters = 5; 
+}
+
+message ConnectWebRtcTransportRequest {
+  BasicInfo base_info = 1;
+  string transport_id =2;
+  bytes dtls_parameters = 3;
+}
+message ConnectWebRtcTransportResponse {
+
+}
+message RestartIceRequest {
+  BasicInfo base_info = 1;
+  string transport_id = 2;
+}
+
+message RestartIceResponse {
+  bytes ice_parameters = 1;
+}
+
+message ProduceRequest {
+  BasicInfo base_info = 1;
+  string transport_id = 2;
+  string media_kind = 3;
+  bytes rtp_parameters = 4;
+  bytes app_data = 5;
+}
+message ProduceResponse {
+  string producer_id = 1;
+}
+
+message ProducerActionRequest {
+  BasicInfo base_info = 1;
+  string producer_id = 2;
+  Action action = 3;
+}
+message ProducerActionResponse {
+
+}
+
+message ConsumeRequest {
+  BasicInfo base_info = 1;
+  string dest_peerid = 2;
+  string producer_id = 3;
+}
+
+message ConsumeResponse {
+  string consumer_id = 1;
+  string media_kind = 2;
+  bytes rtp_parameters = 3;
+  string consumer_type = 4;
+  bool producer_paused = 5;
+  bytes app_data = 6;
+}
+
+message ConsumerActionRequest {
+  BasicInfo base_info = 1;
+  string consumer_id = 2;
+  Action action = 3;
+}
+message ConsumerActionResponse {
+  bytes data = 1;
+}
+
+message GetStatsRequest {
+  BasicInfo base_info = 1;
+  string id = 2;
+  StatsType type = 3;
+}
+message GetStatsResponse {
+  bytes stats = 1;
+}
+
+enum Action {
+  UNDEFINED_ACTION = 0;
+  CLOSE = 1;
+  PAUSE = 2;
+  RESUME = 3;
+}
+
+enum StatsType {
+  UNDEFINED = 0;
+  TRANSPORT = 1;
+  PRODUCER = 2;
+  CONSUMER = 3;
 }

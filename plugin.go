@@ -5,6 +5,7 @@ import (
 
 	"github.com/hashicorp/consul/api"
 	"github.com/itzmanish/go-micro-plugins/registry/consul/v2"
+	"github.com/itzmanish/go-micro-plugins/store/redis/v2"
 	"github.com/itzmanish/go-micro/v2/config/cmd"
 	"github.com/itzmanish/go-micro/v2/registry"
 )
@@ -19,4 +20,6 @@ func init() {
 			},
 		))
 	}
+	cmd.DefaultStores["redis"] = redis.NewStore
+
 }

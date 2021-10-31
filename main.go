@@ -2,29 +2,25 @@ package main
 
 import (
 	"fmt"
-	"net/http"
 	"os"
-	"strings"
 
 	"github.com/itzmanish/pratibimb-node/handler"
 	"github.com/itzmanish/pratibimb-node/internal"
 	v1 "github.com/itzmanish/pratibimb-node/proto/gen/node/v1"
+	"github.com/itzmanish/pratibimb-node/subscriber"
 	"github.com/itzmanish/pratibimb-node/utils"
 	"github.com/jiyeyuran/mediasoup-go"
 	"github.com/joho/godotenv"
 
 	"github.com/itzmanish/go-micro/v2"
 	log "github.com/itzmanish/go-micro/v2/logger"
-	"github.com/itzmanish/go-micro/v2/registry"
-	"github.com/itzmanish/go-micro/v2/server"
-	httpServer "github.com/itzmanish/go-micro/v2/server/http"
 )
 
 const (
-	wsServiceName    = "github.itzmanish.service.pratibimb.node.ws.v1"
-	wsServiceVersion = "1.0.0"
-	serviceName      = "github.itzmanish.service.pratibimb.node.v1"
-	serviceVersion   = "1.0.0"
+	serviceName    = "github.itzmanish.service.pratibimb.node.v1"
+	serviceVersion = "1.0.0"
+
+	coreServiceName = "github.itzmanish.service.pratibimb.v1"
 )
 
 var serviceAddress = utils.GetFreePort()
@@ -48,58 +44,20 @@ func main() {
 		micro.Version(serviceVersion),
 	)
 
-	wsService := httpServer.NewServer(server.Name(wsServiceName),
-		server.Version(wsServiceVersion),
-		server.Address(serviceAddress),
-	)
+	cev := micro.NewEvent(coreServiceName, service.Client())
+	iev := micro.NewEvent(serviceName, service.Client())
 
-	if os.Getenv("ENV") != "production" {
-		publicAddressWithPort = utils.GetFreePortWithHost(serviceAddress)
-	}
+	nodeHandler := handler.NewNodeServiceHandler(internal.DefaultConfig, cev, iev)
 
-	mux := http.NewServeMux()
-
-	log.Debugf("webrtc announce ip: %v", internal.DefaultConfig.Mediasoup.WebRtcTransportOptions.ListenIps)
-
-	pratibimbEventPublisher := micro.NewEvent("github.itzmanish.service.pratibimb.v1", service.Client())
-	// register call handler
-	wshandler := handler.NewWsHandler(internal.DefaultConfig, pratibimbEventPublisher)
-
-	mux.HandleFunc("/", handler.IndexHandler)
-	// router.Handle("/v1/room", middleware.AuthWrapper()(handler.CreateRoom))
-	mux.Handle("/v1/ws", wshandler)
-
-	nodeHandler := handler.NewNodeService(pratibimbEventPublisher)
-
-	service.Init(
-		micro.Metadata(map[string]string{"ws_address": publicAddressWithPort}),
-		micro.AfterStart(func() error {
-			log.Debug("After start executing")
-			srvs, err := registry.GetService(serviceName)
-			if err != nil {
-				return err
-			}
-
-			for _, srv := range srvs {
-				for _, node := range srv.Nodes {
-					if strings.Split(node.Address, ":")[1] == strings.Split(service.Server().Options().Address, ":")[3] {
-						nodeHandler.Init(node.Id, publicAddressWithPort)
-					}
-				}
-			}
-			return nil
-		}))
+	service.Init()
 
 	if err := v1.RegisterNodeServiceHandler(service.Server(), nodeHandler); err != nil {
 		log.Fatal(err)
 	}
 
-	wsServerHandler := wsService.NewHandler(mux)
-	wsService.Handle(wsServerHandler)
-
-	// Start API
-	if err := wsService.Start(); err != nil {
-		log.Fatal(err)
+	err := micro.RegisterSubscriber(serviceName, service.Server(), subscriber.NewNodeSubscriber(publicAddressWithPort))
+	if err != nil {
+		log.Fatal()
 	}
 
 	// Run server
@@ -107,8 +65,4 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Stop API
-	if err := wsService.Stop(); err != nil {
-		log.Fatal(err)
-	}
 }

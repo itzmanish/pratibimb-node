@@ -7,7 +7,7 @@
 			"request": "launch",
 			"mode": "debug",
 			"host": "127.0.0.1",
-			"program": "${workspaceFolder}/main.go",
+			"program": "${workspaceFolder}/.",
 			"env": {
 				// "MEDIASOUP_WORKER_BIN": "mediasoup/worker",
 			},

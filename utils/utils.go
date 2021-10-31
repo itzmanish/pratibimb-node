@@ -5,9 +5,11 @@ import (
 	"crypto/subtle"
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"log"
+	mrand "math/rand"
 	"net"
 	"net/http"
 	"strconv"
@@ -187,4 +189,20 @@ func GetPublicAddressWithPort(address string) string {
 		return GetFreePortWithHost(address)
 	}
 	return fmt.Sprintf("%s:%d", host, port)
+}
+
+func GenerateRandomNumber() uint32 {
+	return mrand.Uint32()
+}
+
+func NewBool(b bool) *bool {
+	return &b
+}
+
+func Clone(dst, source interface{}) error {
+	data, err := json.Marshal(source)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(data, dst)
 }

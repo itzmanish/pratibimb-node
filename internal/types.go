@@ -5,6 +5,7 @@ import (
 
 	"github.com/jiyeyuran/go-eventemitter"
 	"github.com/jiyeyuran/mediasoup-go"
+	uuid "github.com/satori/go.uuid"
 )
 
 const (
@@ -136,4 +137,94 @@ type TransportTraceInfo struct {
 	StartBitrate            uint32
 	MaxPaddingBitrate       uint32
 	AvailableBitrate        uint32
+}
+
+type RoomUpdateRequest struct {
+	RoomID   string `json:"room_id"`
+	PeerName string `json:"peer_name"`
+	PeerID   string `json:"peer_id"`
+}
+
+type Nodes map[string]*Node
+
+type StoreRoom struct {
+	ID         string           `json:"id"`
+	Name       string           `json:"name"`
+	Secret     int32            `json:"secret"`
+	PeersCount int              `json:"peers_count"`
+	Peers      []*StorePeer     `json:"peers"`
+	Nodes      map[string]*Node `json:"nodes"`
+}
+
+type StorePeer struct {
+	Name   string `json:"name"`
+	PeerID string `json:"peer_id"`
+}
+
+type Node struct {
+	ID         string   `json:"node_id"`
+	WSEndpoint string   `json:"ws_endpoint"`
+	Routers    []string `json:"routers"`
+}
+
+type ConnectPipeRouterPayload struct {
+	TransportID    string `json:"transport_id"`
+	Cid            string `json:"correlation_id"`
+	Tuple          mediasoup.TransportTuple
+	SrtpParameters *mediasoup.SrtpParameters
+}
+
+type StrArray []string
+
+func (sa StrArray) Has(value string) bool {
+	for _, s := range sa {
+		if s == value {
+			return true
+		}
+	}
+	return false
+}
+
+type PipeTransportPair struct {
+	localPipeTransport    *mediasoup.PipeTransport
+	remotePipeTransportID string
+}
+
+type ProducePipeTransportPayload struct {
+	ProducerID     string `json:"producer_id"`
+	Kind           mediasoup.MediaKind
+	RtpParameters  mediasoup.RtpParameters
+	Paused         bool
+	AppData        interface{}
+	TransportID    string
+	PipeConsumerID string
+}
+
+type RoomRequest struct {
+	RoomID uuid.UUID `json:"room_id"`
+	PeerID uuid.UUID `json:"peer_id"`
+	Data   []byte    `json:"data"`
+}
+
+type CreateWebRtcTransportOption struct {
+	ForceTcp         bool
+	Producing        bool
+	Consuming        bool
+	SctpCapabilities *mediasoup.SctpCapabilities
+}
+
+type ConnectWebRtcTransportOption struct {
+	TransportId    string
+	DtlsParameters *mediasoup.DtlsParameters
+}
+
+type RestartICEOption struct {
+	TransportId string
+}
+
+type ProduceOption struct {
+	TransportId   string
+	Kind          mediasoup.MediaKind
+	RtpParameters mediasoup.RtpParameters
+	AppData       H
 }

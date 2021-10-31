@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/itzmanish/go-micro/v2/errors"
+	v1 "github.com/itzmanish/pratibimb-node/proto/gen/node/v1"
 )
 
 type Message struct {
@@ -49,43 +50,14 @@ func (m Message) Marshal() []byte {
 	return data
 }
 
-func CreateRequest(method string, data interface{}) Message {
+func CreateNotification(method string, data interface{}, peerId, roomId string) *v1.Message {
 	raw, _ := json.Marshal(data)
 
-	return Message{
-		Request: true,
-		Id:      generateRandomNumber(),
-		Method:  method,
-		Data:    json.RawMessage(raw),
-	}
-}
-
-func CreateSuccessResponse(request Message, data interface{}) Message {
-	raw, _ := json.Marshal(data)
-
-	return Message{
-		Response: true,
-		Id:       request.Id,
-		OK:       true,
-		Data:     json.RawMessage(raw),
-	}
-}
-
-func CreateErrorResponse(request Message, err *Error) Message {
-	return Message{
-		Response: true,
-		Id:       request.Id,
-		Error:    err,
-	}
-}
-
-func CreateNotification(method string, data interface{}) Message {
-	raw, _ := json.Marshal(data)
-
-	return Message{
-		Notification: true,
-		Method:       method,
-		Data:         json.RawMessage(raw),
+	return &v1.Message{
+		Sub:     method,
+		Payload: json.RawMessage(raw),
+		RoomId:  roomId,
+		PeerId:  peerId,
 	}
 }
 

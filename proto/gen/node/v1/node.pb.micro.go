@@ -36,8 +36,23 @@ func NewNodeServiceEndpoints() []*api.Endpoint {
 // Client API for NodeService service
 
 type NodeService interface {
-	CreateNodeRoom(ctx context.Context, in *CreateNodeRoomRequest, opts ...client.CallOption) (*CreateNodeRoomResponse, error)
 	Health(ctx context.Context, in *HealthRequest, opts ...client.CallOption) (*HealthResponse, error)
+	// Actual rpc methods for creating peers
+	CreatePeer(ctx context.Context, in *CreatePeerRequest, opts ...client.CallOption) (*CreatePeerResponse, error)
+	ClosePeer(ctx context.Context, in *ClosePeerRequest, opts ...client.CallOption) (*ClosePeerResponse, error)
+	GetRouterCapabilities(ctx context.Context, in *GetRouterCapabilitiesRequest, opts ...client.CallOption) (*GetRouterCapabilitiesResponse, error)
+	Join(ctx context.Context, in *JoinPeerRequest, opts ...client.CallOption) (*JoinPeerResponse, error)
+	CreateWebRtcTransport(ctx context.Context, in *CreateWebRtcTransportRequest, opts ...client.CallOption) (*CreateWebRtcTransportResponse, error)
+	ConnectWebRtcTransport(ctx context.Context, in *ConnectWebRtcTransportRequest, opts ...client.CallOption) (*ConnectWebRtcTransportResponse, error)
+	RestartIce(ctx context.Context, in *RestartIceRequest, opts ...client.CallOption) (*RestartIceResponse, error)
+	Produce(ctx context.Context, in *ProduceRequest, opts ...client.CallOption) (*ProduceResponse, error)
+	// producer action will have pause/resume/close actions.
+	ProducerAction(ctx context.Context, in *ProducerActionRequest, opts ...client.CallOption) (*ProducerActionResponse, error)
+	Consume(ctx context.Context, in *ConsumeRequest, opts ...client.CallOption) (*ConsumeResponse, error)
+	// consumer action will have pause/resume/close actions.
+	ConsumerAction(ctx context.Context, in *ConsumerActionRequest, opts ...client.CallOption) (*ConsumerActionResponse, error)
+	// Get stats of transport/consumer/producer
+	GetStats(ctx context.Context, in *GetStatsRequest, opts ...client.CallOption) (*GetStatsResponse, error)
 }
 
 type nodeService struct {
@@ -52,16 +67,6 @@ func NewNodeService(name string, c client.Client) NodeService {
 	}
 }
 
-func (c *nodeService) CreateNodeRoom(ctx context.Context, in *CreateNodeRoomRequest, opts ...client.CallOption) (*CreateNodeRoomResponse, error) {
-	req := c.c.NewRequest(c.name, "NodeService.CreateNodeRoom", in)
-	out := new(CreateNodeRoomResponse)
-	err := c.c.Call(ctx, req, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *nodeService) Health(ctx context.Context, in *HealthRequest, opts ...client.CallOption) (*HealthResponse, error) {
 	req := c.c.NewRequest(c.name, "NodeService.Health", in)
 	out := new(HealthResponse)
@@ -72,17 +77,163 @@ func (c *nodeService) Health(ctx context.Context, in *HealthRequest, opts ...cli
 	return out, nil
 }
 
+func (c *nodeService) CreatePeer(ctx context.Context, in *CreatePeerRequest, opts ...client.CallOption) (*CreatePeerResponse, error) {
+	req := c.c.NewRequest(c.name, "NodeService.CreatePeer", in)
+	out := new(CreatePeerResponse)
+	err := c.c.Call(ctx, req, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *nodeService) ClosePeer(ctx context.Context, in *ClosePeerRequest, opts ...client.CallOption) (*ClosePeerResponse, error) {
+	req := c.c.NewRequest(c.name, "NodeService.ClosePeer", in)
+	out := new(ClosePeerResponse)
+	err := c.c.Call(ctx, req, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *nodeService) GetRouterCapabilities(ctx context.Context, in *GetRouterCapabilitiesRequest, opts ...client.CallOption) (*GetRouterCapabilitiesResponse, error) {
+	req := c.c.NewRequest(c.name, "NodeService.GetRouterCapabilities", in)
+	out := new(GetRouterCapabilitiesResponse)
+	err := c.c.Call(ctx, req, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *nodeService) Join(ctx context.Context, in *JoinPeerRequest, opts ...client.CallOption) (*JoinPeerResponse, error) {
+	req := c.c.NewRequest(c.name, "NodeService.Join", in)
+	out := new(JoinPeerResponse)
+	err := c.c.Call(ctx, req, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *nodeService) CreateWebRtcTransport(ctx context.Context, in *CreateWebRtcTransportRequest, opts ...client.CallOption) (*CreateWebRtcTransportResponse, error) {
+	req := c.c.NewRequest(c.name, "NodeService.CreateWebRtcTransport", in)
+	out := new(CreateWebRtcTransportResponse)
+	err := c.c.Call(ctx, req, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *nodeService) ConnectWebRtcTransport(ctx context.Context, in *ConnectWebRtcTransportRequest, opts ...client.CallOption) (*ConnectWebRtcTransportResponse, error) {
+	req := c.c.NewRequest(c.name, "NodeService.ConnectWebRtcTransport", in)
+	out := new(ConnectWebRtcTransportResponse)
+	err := c.c.Call(ctx, req, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *nodeService) RestartIce(ctx context.Context, in *RestartIceRequest, opts ...client.CallOption) (*RestartIceResponse, error) {
+	req := c.c.NewRequest(c.name, "NodeService.RestartIce", in)
+	out := new(RestartIceResponse)
+	err := c.c.Call(ctx, req, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *nodeService) Produce(ctx context.Context, in *ProduceRequest, opts ...client.CallOption) (*ProduceResponse, error) {
+	req := c.c.NewRequest(c.name, "NodeService.Produce", in)
+	out := new(ProduceResponse)
+	err := c.c.Call(ctx, req, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *nodeService) ProducerAction(ctx context.Context, in *ProducerActionRequest, opts ...client.CallOption) (*ProducerActionResponse, error) {
+	req := c.c.NewRequest(c.name, "NodeService.ProducerAction", in)
+	out := new(ProducerActionResponse)
+	err := c.c.Call(ctx, req, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *nodeService) Consume(ctx context.Context, in *ConsumeRequest, opts ...client.CallOption) (*ConsumeResponse, error) {
+	req := c.c.NewRequest(c.name, "NodeService.Consume", in)
+	out := new(ConsumeResponse)
+	err := c.c.Call(ctx, req, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *nodeService) ConsumerAction(ctx context.Context, in *ConsumerActionRequest, opts ...client.CallOption) (*ConsumerActionResponse, error) {
+	req := c.c.NewRequest(c.name, "NodeService.ConsumerAction", in)
+	out := new(ConsumerActionResponse)
+	err := c.c.Call(ctx, req, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *nodeService) GetStats(ctx context.Context, in *GetStatsRequest, opts ...client.CallOption) (*GetStatsResponse, error) {
+	req := c.c.NewRequest(c.name, "NodeService.GetStats", in)
+	out := new(GetStatsResponse)
+	err := c.c.Call(ctx, req, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // Server API for NodeService service
 
 type NodeServiceHandler interface {
-	CreateNodeRoom(context.Context, *CreateNodeRoomRequest, *CreateNodeRoomResponse) error
 	Health(context.Context, *HealthRequest, *HealthResponse) error
+	// Actual rpc methods for creating peers
+	CreatePeer(context.Context, *CreatePeerRequest, *CreatePeerResponse) error
+	ClosePeer(context.Context, *ClosePeerRequest, *ClosePeerResponse) error
+	GetRouterCapabilities(context.Context, *GetRouterCapabilitiesRequest, *GetRouterCapabilitiesResponse) error
+	Join(context.Context, *JoinPeerRequest, *JoinPeerResponse) error
+	CreateWebRtcTransport(context.Context, *CreateWebRtcTransportRequest, *CreateWebRtcTransportResponse) error
+	ConnectWebRtcTransport(context.Context, *ConnectWebRtcTransportRequest, *ConnectWebRtcTransportResponse) error
+	RestartIce(context.Context, *RestartIceRequest, *RestartIceResponse) error
+	Produce(context.Context, *ProduceRequest, *ProduceResponse) error
+	// producer action will have pause/resume/close actions.
+	ProducerAction(context.Context, *ProducerActionRequest, *ProducerActionResponse) error
+	Consume(context.Context, *ConsumeRequest, *ConsumeResponse) error
+	// consumer action will have pause/resume/close actions.
+	ConsumerAction(context.Context, *ConsumerActionRequest, *ConsumerActionResponse) error
+	// Get stats of transport/consumer/producer
+	GetStats(context.Context, *GetStatsRequest, *GetStatsResponse) error
 }
 
 func RegisterNodeServiceHandler(s server.Server, hdlr NodeServiceHandler, opts ...server.HandlerOption) error {
 	type nodeService interface {
-		CreateNodeRoom(ctx context.Context, in *CreateNodeRoomRequest, out *CreateNodeRoomResponse) error
 		Health(ctx context.Context, in *HealthRequest, out *HealthResponse) error
+		CreatePeer(ctx context.Context, in *CreatePeerRequest, out *CreatePeerResponse) error
+		ClosePeer(ctx context.Context, in *ClosePeerRequest, out *ClosePeerResponse) error
+		GetRouterCapabilities(ctx context.Context, in *GetRouterCapabilitiesRequest, out *GetRouterCapabilitiesResponse) error
+		Join(ctx context.Context, in *JoinPeerRequest, out *JoinPeerResponse) error
+		CreateWebRtcTransport(ctx context.Context, in *CreateWebRtcTransportRequest, out *CreateWebRtcTransportResponse) error
+		ConnectWebRtcTransport(ctx context.Context, in *ConnectWebRtcTransportRequest, out *ConnectWebRtcTransportResponse) error
+		RestartIce(ctx context.Context, in *RestartIceRequest, out *RestartIceResponse) error
+		Produce(ctx context.Context, in *ProduceRequest, out *ProduceResponse) error
+		ProducerAction(ctx context.Context, in *ProducerActionRequest, out *ProducerActionResponse) error
+		Consume(ctx context.Context, in *ConsumeRequest, out *ConsumeResponse) error
+		ConsumerAction(ctx context.Context, in *ConsumerActionRequest, out *ConsumerActionResponse) error
+		GetStats(ctx context.Context, in *GetStatsRequest, out *GetStatsResponse) error
 	}
 	type NodeService struct {
 		nodeService
@@ -95,10 +246,54 @@ type nodeServiceHandler struct {
 	NodeServiceHandler
 }
 
-func (h *nodeServiceHandler) CreateNodeRoom(ctx context.Context, in *CreateNodeRoomRequest, out *CreateNodeRoomResponse) error {
-	return h.NodeServiceHandler.CreateNodeRoom(ctx, in, out)
-}
-
 func (h *nodeServiceHandler) Health(ctx context.Context, in *HealthRequest, out *HealthResponse) error {
 	return h.NodeServiceHandler.Health(ctx, in, out)
+}
+
+func (h *nodeServiceHandler) CreatePeer(ctx context.Context, in *CreatePeerRequest, out *CreatePeerResponse) error {
+	return h.NodeServiceHandler.CreatePeer(ctx, in, out)
+}
+
+func (h *nodeServiceHandler) ClosePeer(ctx context.Context, in *ClosePeerRequest, out *ClosePeerResponse) error {
+	return h.NodeServiceHandler.ClosePeer(ctx, in, out)
+}
+
+func (h *nodeServiceHandler) GetRouterCapabilities(ctx context.Context, in *GetRouterCapabilitiesRequest, out *GetRouterCapabilitiesResponse) error {
+	return h.NodeServiceHandler.GetRouterCapabilities(ctx, in, out)
+}
+
+func (h *nodeServiceHandler) Join(ctx context.Context, in *JoinPeerRequest, out *JoinPeerResponse) error {
+	return h.NodeServiceHandler.Join(ctx, in, out)
+}
+
+func (h *nodeServiceHandler) CreateWebRtcTransport(ctx context.Context, in *CreateWebRtcTransportRequest, out *CreateWebRtcTransportResponse) error {
+	return h.NodeServiceHandler.CreateWebRtcTransport(ctx, in, out)
+}
+
+func (h *nodeServiceHandler) ConnectWebRtcTransport(ctx context.Context, in *ConnectWebRtcTransportRequest, out *ConnectWebRtcTransportResponse) error {
+	return h.NodeServiceHandler.ConnectWebRtcTransport(ctx, in, out)
+}
+
+func (h *nodeServiceHandler) RestartIce(ctx context.Context, in *RestartIceRequest, out *RestartIceResponse) error {
+	return h.NodeServiceHandler.RestartIce(ctx, in, out)
+}
+
+func (h *nodeServiceHandler) Produce(ctx context.Context, in *ProduceRequest, out *ProduceResponse) error {
+	return h.NodeServiceHandler.Produce(ctx, in, out)
+}
+
+func (h *nodeServiceHandler) ProducerAction(ctx context.Context, in *ProducerActionRequest, out *ProducerActionResponse) error {
+	return h.NodeServiceHandler.ProducerAction(ctx, in, out)
+}
+
+func (h *nodeServiceHandler) Consume(ctx context.Context, in *ConsumeRequest, out *ConsumeResponse) error {
+	return h.NodeServiceHandler.Consume(ctx, in, out)
+}
+
+func (h *nodeServiceHandler) ConsumerAction(ctx context.Context, in *ConsumerActionRequest, out *ConsumerActionResponse) error {
+	return h.NodeServiceHandler.ConsumerAction(ctx, in, out)
+}
+
+func (h *nodeServiceHandler) GetStats(ctx context.Context, in *GetStatsRequest, out *GetStatsResponse) error {
+	return h.NodeServiceHandler.GetStats(ctx, in, out)
 }

@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
-	"time"
 
+	"github.com/itzmanish/go-micro/v2"
 	"github.com/itzmanish/go-micro/v2/errors"
 	log "github.com/itzmanish/go-micro/v2/logger"
-	"github.com/itzmanish/pratibimb-node/internal/permission"
-	"github.com/itzmanish/pratibimb-node/internal/role"
+	v1 "github.com/itzmanish/pratibimb-node/proto/gen/node/v1"
+	"github.com/itzmanish/pratibimb-node/utils"
 	"github.com/jiyeyuran/go-eventemitter"
 	"github.com/jiyeyuran/mediasoup-go"
 	uuid "github.com/satori/go.uuid"
@@ -18,26 +18,23 @@ import (
 
 type Room struct {
 	EventEmitter
-	locker               sync.RWMutex
-	ID                   uuid.UUID
-	RoomName             string
-	AudioLevelObserver   mediasoup.IRtpObserver
-	Routers              map[string]*mediasoup.Router
-	logger               log.Logger
-	peers                map[uuid.UUID]*Peer
-	chatHistory          []map[string]interface{}
-	fileHistory          []string
-	lastN                []uuid.UUID
-	closed               int32
-	locked               bool
-	accessCode           int32
-	selfDestructTimeout  time.Duration
-	currentActiveSpeaker *Peer
+	locker             sync.RWMutex
+	NodeID             string
+	ID                 uuid.UUID
+	RoomName           string
+	AudioLevelObserver mediasoup.IRtpObserver
+	Routers            map[string]*mediasoup.Router
+	peers              map[uuid.UUID]*Peer
+	lastN              []uuid.UUID
+	logger             log.Logger
+	closed             int32
+	locked             bool
+	accessCode         int32
+	core_publisher     micro.Event
+	internal_publisher micro.Event
 }
 
-var wg sync.WaitGroup
-
-func NewRoom(mediasoupWorker []*mediasoup.Worker, roomID string, accessCode int32) (*Room, error) {
+func NewRoom(mediasoupWorker []*mediasoup.Worker, roomID uuid.UUID, roomName string, accessCode int32, core_publisher, internal_publisher micro.Event) (*Room, error) {
 
 	log.Infof("create() [RoomId: %s]", roomID)
 
@@ -78,21 +75,28 @@ func NewRoom(mediasoupWorker []*mediasoup.Worker, roomID string, accessCode int3
 	}
 
 	room := &Room{
-		ID:                  uuid.NewV4(),
-		RoomName:            roomID,
-		Routers:             routers,
-		AudioLevelObserver:  audioLevelObserver,
-		logger:              log.NewLogger(log.WithFields(map[string]interface{}{"caller": "Room"})),
-		peers:               make(map[uuid.UUID]*Peer),
-		EventEmitter:        eventemitter.NewEventEmitter(),
-		selfDestructTimeout: 1 * time.Minute,
-		chatHistory:         make([]map[string]interface{}, 0),
-		fileHistory:         make([]string, 0),
-		lastN:               make([]uuid.UUID, 0),
-		accessCode:          accessCode,
+		ID:                 roomID,
+		RoomName:           roomName,
+		Routers:            routers,
+		AudioLevelObserver: audioLevelObserver,
+		logger:             log.NewLogger(log.WithFields(map[string]interface{}{"caller": "Room"})),
+		peers:              make(map[uuid.UUID]*Peer),
+		EventEmitter:       eventemitter.NewEventEmitter(),
+		lastN:              make([]uuid.UUID, 0),
+		accessCode:         accessCode,
+		core_publisher:     core_publisher,
+		internal_publisher: internal_publisher,
 	}
 
 	room.handleAudioLevelObserver()
+
+	// room.On("scale", func(msg *v1.Message) {
+	// 	room.handleRoomScaling(msg)
+	// })
+
+	// room.On("pipeTransportConnected", func(transportId string) {
+	// 	room.handlePipeTransportConnect(transportId)
+	// })
 
 	return room, nil
 }
@@ -146,21 +150,19 @@ func (r *Room) ValidSecret(secret int32) bool {
 	return r.accessCode == secret
 }
 
-func (r *Room) CreatePeer(peerId, roomID uuid.UUID, transport Transport) (peer *Peer, err error) {
+func (r *Room) CreatePeer(peerId uuid.UUID) (peer *Peer, err error) {
 	r.locker.Lock()
 	defer r.locker.Unlock()
 
-	r.logger.Log(log.InfoLevel, "createPeer()", "peerId", peerId, "transport", transport.String())
+	r.logger.Log(log.InfoLevel, "createPeer()", "peerId", peerId)
 
 	if _, ok := r.peers[peerId]; ok {
-		transport.Close()
 		err = errors.Conflict("PEER_EXISTS", `there is already a Peer with same peerId [peerId:"%s"]`, peerId)
 		delete(r.peers, peerId)
 		return
 	}
 
-	peer = NewPeer(peerId, roomID, transport)
-	peer.Name = "Guest"
+	peer = NewPeer(peerId, r.ID, r.core_publisher)
 
 	if r.peers == nil {
 		r.peers = make(map[uuid.UUID]*Peer)
@@ -196,13 +198,9 @@ func (r *Room) GetPeer(peerId uuid.UUID) *Peer {
 	return p
 }
 
-func (r *Room) VerifyPeer(id uuid.UUID) bool {
-	p := r.GetPeer(id)
-	return p != nil
-}
-
+// TODO: check if I need this
 func (r *Room) HandlePeer(peer *Peer, returning bool) {
-	r.logger.Logf(log.InfoLevel, "[peer:%v, roles:%v, returning:%v]", peer.GetID(), peer.GetRoles(), returning)
+	r.logger.Logf(log.InfoLevel, "[peer:%v, returning:%v]", peer.GetID(), returning)
 
 	// Returning user
 	if returning {
@@ -228,9 +226,7 @@ func (r *Room) handleAudioLevelObserver() {
 
 	})
 	r.AudioLevelObserver.On("silence", func() {
-
 		r.notification(nil, "activeSpeaker", H{"peerId": nil}, true, false)
-
 	})
 }
 
@@ -250,36 +246,12 @@ func (r *Room) GetID() string {
 	return r.ID.String()
 }
 
-func (r *Room) selfDestructCountdown() {
-	r.logger.Log(log.DebugLevel, "selfDestructCountdown() started")
-	wg.Add(1)
-	time.AfterFunc(r.selfDestructTimeout, func() {
-		if r.Closed() {
-			wg.Done()
-			return
-		}
-		if r.CheckEmpty() {
-			r.logger.Logf(log.InfoLevel, "Room deserted for some time, closing the room [roomId: %s]", r.GetID())
-			r.Close()
-			wg.Done()
-		} else {
-			r.logger.Log(log.DebugLevel, "SelfDestructCountdown() aborted; room is not empty!")
-			wg.Done()
-		}
-	})
-	wg.Wait()
-}
-
 func (r *Room) CheckEmpty() bool {
 	return len(r.peers) == 0
 }
 
 func (r *Room) peerJoining(peer *Peer, returning bool) {
-	for _, v := range r.lastN {
-		if !uuid.Equal(v, peer.ID) {
-			r.lastN = append(r.lastN, peer.ID)
-		}
-	}
+
 	r.locker.Lock()
 	r.peers[peer.ID] = peer
 	r.locker.Unlock()
@@ -300,46 +272,6 @@ func (r *Room) handlePeer(peer *Peer) {
 	peer.On("close", func() {
 		r.handlePeerClose(peer)
 	})
-	peer.On("displayNameChanged", func(oldDisplayName string) {
-		if !peer.joined {
-			return
-		}
-		r.notification(peer, "changeDisplayName",
-			[]byte(fmt.Sprintf("{peerId: %s,displayName: %s,oldDisplayName: %s}", peer.ID.String(), peer.Name, oldDisplayName)),
-			true, false)
-	})
-	peer.On("pictureChanged", func() {
-		if !peer.joined {
-			return
-		}
-		r.notification(peer, "changePicture",
-			H{"peerId": nil, "picture": peer.ProfilePictureURL}, true, false)
-	})
-
-	peer.On("gotRole", func(newRole role.Role) {
-		// TODO gotRole
-		if !peer.GetJoined() {
-			return
-		}
-		r.notification(peer, "gotRole",
-			H{"peerId": nil, "role": newRole}, true, true)
-	})
-
-	peer.On("lostRole", func(oldRole role.Role) {
-		if !peer.joined {
-			return
-		}
-		r.notification(peer, "lostRole",
-			H{"peerId": peer.GetID(), "role": oldRole}, true, true)
-	})
-
-	peer.On("request", func(request Message, accept func(data interface{}), reject func(err error)) {
-		r.logger.Log(log.DebugLevel, fmt.Sprintf("Peer 'request' event [method:%s, peerId: %s]", request.Method, peer.GetID()))
-		err := r.handleTransportRequest(peer, request, accept)
-		if err != nil {
-			reject(err)
-		}
-	})
 
 	// Peer left before we were done joining
 	if peer.Closed() {
@@ -359,16 +291,6 @@ func (r *Room) handlePeerClose(peer *Peer) {
 		r.notification(peer, "peerClosed",
 			H{"peerId": peer.GetID()}, true, false)
 	}
-	r.locker.Lock()
-	// Remove from lastN
-	var filteredLastN []uuid.UUID
-	for _, p := range r.lastN {
-		if !uuid.Equal(peer.ID, p) {
-			filteredLastN = append(filteredLastN, p)
-		}
-	}
-	r.lastN = filteredLastN
-	r.locker.Unlock()
 
 	var filteredPeers = make(map[uuid.UUID]*Peer)
 	r.locker.Lock()
@@ -380,991 +302,328 @@ func (r *Room) handlePeerClose(peer *Peer) {
 	r.peers = filteredPeers
 	r.locker.Unlock()
 
-	// If this is the last Peer in the room and
-	// lobby is empty, close the room after a while.
-	if r.CheckEmpty() {
-		r.selfDestructCountdown()
-	}
 }
 
-func (r *Room) handleTransportRequest(peer *Peer, req Message, accept func(data interface{})) error {
-	router := peer.router
-	r.logger.Logf(log.InfoLevel, "request recieved with method: %v", req.Method)
-	switch req.Method {
-	case "getRouterRtpCapabilities":
-		accept(router.RtpCapabilities())
+func (r *Room) GetRouterRtpCapabilities(peer *Peer) mediasoup.RtpCapabilities {
+	return peer.router.RtpCapabilities()
+}
 
-	case "join":
-		if peer.GetJoined() {
-			return errors.Conflict("ALREADY_JOINED", "Peer already joined")
+func (r *Room) SetRtpCapabilities(peer *Peer, rtpCapabilities *mediasoup.RtpCapabilities) {
+	peer.SetJoined(true)
+	peer.SetRtpCapabilities(rtpCapabilities)
+}
+
+func (r *Room) CreateWebRtcTransport(peer *Peer, opt CreateWebRtcTransportOption) (*v1.CreateWebRtcTransportResponse, error) {
+	webRtcTransportOptions := mediasoup.WebRtcTransportOptions{}
+	err := utils.Clone(&webRtcTransportOptions, DefaultConfig.Mediasoup.WebRtcTransportOptions)
+	if err != nil {
+		return nil, errors.InternalServerError("CLONING_ERROR", "Unable to clone transport options.")
+	}
+
+	webRtcTransportOptions.EnableSctp = opt.SctpCapabilities != nil
+
+	if opt.SctpCapabilities != nil {
+		webRtcTransportOptions.NumSctpStreams = opt.SctpCapabilities.NumStreams
+	}
+
+	webRtcTransportOptions.AppData = &TransportData{
+		Producing: opt.Producing,
+		Consuming: opt.Consuming,
+	}
+
+	if opt.ForceTcp {
+		webRtcTransportOptions.EnableUdp = utils.NewBool(false)
+		webRtcTransportOptions.EnableTcp = true
+	} else {
+		webRtcTransportOptions.PreferUdp = true
+	}
+
+	transport, err := peer.router.CreateWebRtcTransport(webRtcTransportOptions)
+	if err != nil {
+		return nil, err
+	}
+	// transport.On("sctpstatechange", func(sctpState mediasoup.SctpState) {
+	// 	r.logger.Log(log.DebugLevel,fmt.Sprintf("sctpState: %v WebRtcTransport: %v Event",sctpState,sctpstatechange))
+	// })
+	transport.On("dtlsstatechange", func(dtlsState mediasoup.DtlsState) {
+		if dtlsState == "failed" || dtlsState == "closed" {
+			r.logger.Log(log.WarnLevel, fmt.Sprintf("WebRtcTransport 'dtlsstatechange' event [dtlsState: %s]", dtlsState))
 		}
-		requestData := PeerData{}
+	})
 
-		if err := json.Unmarshal(req.Data, &requestData); err != nil {
-			return errors.BadRequest("BAD_DATA_FORMAT", "Bad Data format: %v", err)
+	// NOTE: For testing.
+	// transport.EnableTraceEvent("probation", "bwe")
+	// if err = transport.EnableTraceEvent("bwe"); err != nil {
+	// 	return err
+	// }
+
+	// transport.On("trace", func(trace mediasoup.TransportTraceEventData) {
+	// 	r.logger.Debug().
+	// 		Str("transportId", transport.Id()).
+	// 		Str("trace.type", string(trace.Type)).
+	// 		Interface("trace", trace).
+	// 		Msg(`"transport "trace" event`)
+
+	// 	if trace.Type == "bwe" && trace.Direction == "out" {
+	// 		peer.Notify("downlinkBwe", trace.Info)
+	// 	}
+	// })
+
+	// Store the WebRtcTransport into the protoo Peer data Object.
+	peer.AddTransport(transport)
+
+	maxIncomingBitrate := DefaultConfig.Mediasoup.WebRtcTransportOptions.MaxIncomingBitrate
+
+	if maxIncomingBitrate > 0 {
+		if err := transport.SetMaxIncomingBitrate(maxIncomingBitrate); err != nil {
+			return nil, err
 		}
+	}
+	iceParameters, _ := json.Marshal(transport.IceParameters())
+	iceCandidates, _ := json.Marshal(transport.IceCandidates())
+	dtlsParameters, _ := json.Marshal(transport.DtlsParameters())
+	sctpParameters, _ := json.Marshal(transport.SctpParameters())
 
-		peer.SetRtpCapabilities(requestData.RtpCapabilities)
-		peer.SetDisplayName(requestData.DisplayName)
+	return &v1.CreateWebRtcTransportResponse{
+		TransportId:    transport.Id(),
+		IceParameters:  iceParameters,
+		IceCandidates:  iceCandidates,
+		DtlsParameters: dtlsParameters,
+		SctpParameters: sctpParameters,
+	}, nil
 
-		joinedPeers := r.getJoinedPeers(peer)
+}
+func (r *Room) ConnectWebRtcTransport(peer *Peer, opt ConnectWebRtcTransportOption) error {
+	transport, ok := peer.GetTransport(opt.TransportId)
+	if !ok {
+		return ErrTransportNotFound(opt.TransportId)
 
-		peerInfos := []*PeerInfo{}
+	}
+	return transport.Connect(mediasoup.TransportConnectOptions{
+		DtlsParameters: opt.DtlsParameters,
+	})
+}
 
-		for _, joinedPeer := range joinedPeers {
-			peerInfos = append(peerInfos, &PeerInfo{
-				Id:          joinedPeer.GetID(),
-				DisplayName: joinedPeer.Name,
-				Device:      joinedPeer.data.Device,
+func (r *Room) RestartICE(peer *Peer, opt RestartICEOption) (*v1.RestartIceResponse, error) {
+	// Ensure the Peer is joined.
+	if !peer.GetJoined() {
+		return nil, ErrPeerNotJoined
+	}
+	transport, ok := peer.GetTransport(opt.TransportId)
+	if !ok {
+		return nil, ErrTransportNotFound(opt.TransportId)
+	}
+	iceParameters, err := transport.RestartIce()
+	if err != nil {
+		return nil, err
+	}
+	ice, _ := json.Marshal(iceParameters)
+	return &v1.RestartIceResponse{
+		IceParameters: ice,
+	}, nil
+}
+
+func (r *Room) Produce(peer *Peer, opt ProduceOption) (string, error) {
+	// Ensure the Peer is joined.
+	if !peer.GetJoined() {
+		return "", ErrPeerNotJoined
+	}
+	transport, ok := peer.GetTransport(opt.TransportId)
+	if !ok {
+		return "", ErrTransportNotFound(opt.TransportId)
+	}
+	// // Add peerId into appData to later get the associated Peer during
+	// // the "loudest" event of the audioLevelObserver.
+	appData := opt.AppData
+	if appData == nil {
+		appData = H{}
+	}
+
+	if !peer.GetJoined() {
+		return "", errors.NotFound("PEER_NOT_JOINED", "Peer not joined")
+	}
+
+	appData["peerId"] = peer.GetID()
+
+	producer, err := transport.Produce(mediasoup.ProducerOptions{
+		Kind:          opt.Kind,
+		RtpParameters: opt.RtpParameters,
+		AppData:       appData,
+		// KeyFrameRequestDelay: 5000,
+	})
+	if err != nil {
+		return "", err
+	}
+	pipeRouters := r.getRoutersToPipeTo(peer.GetRouterID())
+
+	for routerId, destinationRouter := range r.Routers {
+		has := false
+		for _, rr := range pipeRouters {
+			if rr.Id() == routerId {
+				has = true
+			}
+		}
+		if has {
+			peer.router.PipeToRouter(mediasoup.PipeToRouterOptions{
+				ProducerId: producer.Id(),
+				Router:     destinationRouter,
 			})
 		}
+	}
 
+	// Store the Producer into the protoo Peer data Object.
+	peer.AddProducer(producer)
+
+	// r.mapPipeTransports.Range(func(key, value interface{}) bool {
+	// 	v, ok := value.(PipeTransportPair)
+	// 	if !ok {
+	// 		return true
+	// 	}
+	// 	r.handlePipeTransportConnect(v.localPipeTransport.Id())
+	// 	return true
+	// })
+
+	producer.On("score", func(score []mediasoup.ProducerScore) {
 		db := H{
-			"peers":                peerInfos,
-			"roles":                peer.GetRoles(),
-			"tracker":              DefaultConfig.FileTracker,
-			"roomPermission":       permission.RoomPermissions,
-			"userRoles":            []role.Role{role.ADMIN, role.AUTHENTICATED, role.MODERATOR, role.NORMAL, role.PRESENTER},
-			"allowWhenRoleMissing": permission.AllowWhenRoleMissing,
-			"chatHistory":          r.chatHistory,
-			"fileHistory":          r.fileHistory,
-			"lastNHistory":         r.lastN,
-			"locked":               r.locked,
-			"accessCode":           r.accessCode,
+			"producerId": producer.Id(),
+			"score":      score,
 		}
+		peer.Notify("producerScore", db)
+	})
+	producer.On("videoorientationchange", func(videoOrientation mediasoup.ProducerVideoOrientation) {
+		r.logger.Log(log.DebugLevel, "producerId", producer.Id(), "videoOrientation", videoOrientation, "producer 'videoorientationchange' event")
+	})
 
-		accept(db)
+	// NOTE: For testing.
+	// producer.EnableTraceEvent("rtp", "keyframe", "nack", "pli", "fir");
+	// producer.EnableTraceEvent("pli", "fir");
+	// producer.EnableTraceEvent("keyframe");
 
-		peer.SetJoined(true)
+	// producer.On("trace", func(trace mediasoup.ProducerTraceEventData) {
+	// 	r.logger.Debug().
+	// 		Str("producerId", producer.Id()).
+	// 		Str("trace.type", string(trace.Type)).
+	// 		Interface("trace", trace).
+	// 		Msg(`producer "trace" event`)
+	// })getConsumerStats
 
-		for _, joinedPeer := range joinedPeers {
+	// TODO: should be handled by core
+	// // Optimization: Create a server-side Consumer for each Peer.
+	// for _, otherPeer := range r.getJoinedPeers(peer) {
+	// 	r.createConsumer(otherPeer, peer, producer)
+	// }
 
-			// Create Consumers for existing Producers.
-			for _, producer := range joinedPeer.data.Producers {
-				r.createConsumer(peer, joinedPeer, producer)
-			}
-
-			// No need of creating data consumer for now.
-			// Create DataConsumers for existing DataProducers.
-			// for _, dataProducer := range data.DataProducers {
-			// 	r.createDataConsumer(peer, joinedPeer, dataProducer)
-			// }
-		}
-
-		db = H{
-			"id":          peer.GetID(),
-			"displayName": peer.GetDisplayName(),
-			"picture":     peer.data.Picture,
-			"roles":       peer.GetRoles(),
-		}
-
-		r.notification(peer, "newPeer", db, true, false)
-
-	case "createWebRtcTransport":
-		{
-			// NOTE: Don't require that the Peer is joined here, so the client can
-			// initiate mediasoup Transports and be ready when he later joins.
-
-			var requestData struct {
-				ForceTcp         bool
-				Producing        bool
-				Consuming        bool
-				SctpCapabilities *mediasoup.SctpCapabilities
-			}
-			if err := json.Unmarshal(req.Data, &requestData); err != nil {
-				return errors.BadRequest("BAD_DATA_FORMAT", "Bad Data format: %v", err)
-			}
-
-			webRtcTransportOptions := mediasoup.WebRtcTransportOptions{}
-			err := Clone(&webRtcTransportOptions, DefaultConfig.Mediasoup.WebRtcTransportOptions)
-			if err != nil {
-				return errors.InternalServerError("CLONING_ERROR", "Unable to clone transport options.")
-			}
-
-			webRtcTransportOptions.EnableSctp = requestData.SctpCapabilities != nil
-
-			if requestData.SctpCapabilities != nil {
-				webRtcTransportOptions.NumSctpStreams = requestData.SctpCapabilities.NumStreams
-			}
-
-			webRtcTransportOptions.AppData = &TransportData{
-				Producing: requestData.Producing,
-				Consuming: requestData.Consuming,
-			}
-
-			if requestData.ForceTcp {
-				webRtcTransportOptions.EnableUdp = NewBool(false)
-				webRtcTransportOptions.EnableTcp = true
-			} else {
-				webRtcTransportOptions.PreferUdp = true
-			}
-
-			transport, err := router.CreateWebRtcTransport(webRtcTransportOptions)
-			if err != nil {
-				return err
-			}
-			// transport.On("sctpstatechange", func(sctpState mediasoup.SctpState) {
-			// 	r.logger.Log(log.DebugLevel,fmt.Sprintf("sctpState: %v WebRtcTransport: %v Event",sctpState,sctpstatechange))
-			// })
-			transport.On("dtlsstatechange", func(dtlsState mediasoup.DtlsState) {
-				if dtlsState == "failed" || dtlsState == "closed" {
-					r.logger.Log(log.WarnLevel, fmt.Sprintf("WebRtcTransport 'dtlsstatechange' event [dtlsState: %s]", dtlsState))
-				}
-			})
-
-			// NOTE: For testing.
-			// transport.EnableTraceEvent("probation", "bwe")
-			// if err = transport.EnableTraceEvent("bwe"); err != nil {
-			// 	return err
-			// }
-
-			// transport.On("trace", func(trace mediasoup.TransportTraceEventData) {
-			// 	r.logger.Debug().
-			// 		Str("transportId", transport.Id()).
-			// 		Str("trace.type", string(trace.Type)).
-			// 		Interface("trace", trace).
-			// 		Msg(`"transport "trace" event`)
-
-			// 	if trace.Type == "bwe" && trace.Direction == "out" {
-			// 		peer.Notify("downlinkBwe", trace.Info)
-			// 	}
-			// })
-
-			// Store the WebRtcTransport into the protoo Peer data Object.
-			peer.AddTransport(transport)
-			db := H{
-				"id":             transport.Id(),
-				"iceParameters":  transport.IceParameters(),
-				"iceCandidates":  transport.IceCandidates(),
-				"dtlsParameters": transport.DtlsParameters(),
-				"sctpParameters": transport.SctpParameters(),
-			}
-
-			accept(db)
-
-			maxIncomingBitrate := DefaultConfig.Mediasoup.WebRtcTransportOptions.MaxIncomingBitrate
-
-			if maxIncomingBitrate > 0 {
-				if err := transport.SetMaxIncomingBitrate(maxIncomingBitrate); err != nil {
-					return err
-				}
-			}
-		}
-
-	case "connectWebRtcTransport":
-		var requestData struct {
-			TransportId    string                    `json:"transportId,omitempty"`
-			DtlsParameters *mediasoup.DtlsParameters `json:"dtlsParameters,omitempty"`
-		}
-		if err := json.Unmarshal(req.Data, &requestData); err != nil {
-			return errors.BadRequest("BAD_DATA_FORMAT", "Bad Data format", err)
-		}
-		transport, ok := peer.GetTransport(requestData.TransportId)
-		if !ok {
-			return ErrTransportNotFound(requestData.TransportId)
-
-		}
-		if err := transport.Connect(mediasoup.TransportConnectOptions{
-			DtlsParameters: requestData.DtlsParameters,
-		}); err != nil {
-			return err
-		}
-		accept(nil)
-
-	case "restartIce":
-		var requestData struct {
-			TransportId string `json:"transportId,omitempty"`
-		}
-		if err := json.Unmarshal(req.Data, &requestData); err != nil {
-			return errors.BadRequest("BAD_DATA_FORMAT", "Bad Data format", err)
-		}
-		transport, ok := peer.GetTransport(requestData.TransportId)
-		if !ok {
-			return ErrTransportNotFound(requestData.TransportId)
-		}
-		iceParameters, err := transport.RestartIce()
-		if err != nil {
-			return err
-		}
-		accept(iceParameters)
-
-	case "produce":
-		// Ensure the Peer is joined.
-		if !peer.GetJoined() {
-
-			return ErrPeerNotJoined
-		}
-		var requestData struct {
-			TransportId   string                  `json:"transportId,omitempty"`
-			Kind          mediasoup.MediaKind     `json:"kind,omitempty"`
-			RtpParameters mediasoup.RtpParameters `json:"rtpParameters,omitempty"`
-			AppData       H                       `json:"appData,omitempty"`
-		}
-		if err := json.Unmarshal(req.Data, &requestData); err != nil {
-			return errors.BadRequest("BAD_DATA_FORMAT", "Bad Data format", err)
-		}
-		transport, ok := peer.GetTransport(requestData.TransportId)
-		if !ok {
-			return ErrTransportNotFound(requestData.TransportId)
-		}
-		// // Add peerId into appData to later get the associated Peer during
-		// // the "loudest" event of the audioLevelObserver.
-		appData := requestData.AppData
-		if appData == nil {
-			appData = H{}
-		}
-		if source, ok := appData["source"]; ok {
-			if source == "screen" && !r.hasPermission(peer, permission.SHARE_SCREEN) {
-				return errors.Unauthorized("PEER_UNAUTHORIZED", "Peer not authorized")
-			}
-			if source == "extravideo" && !r.hasPermission(peer, permission.EXTRA_VIDEO) {
-				return errors.Unauthorized("PEER_UNAUTHORIZED", "Peer not authorized")
-			}
-		}
-		if !peer.GetJoined() {
-			return errors.NotFound("PEER_NOT_JOINED", "Peer not joined")
-		}
-
-		appData["peerId"] = peer.GetID()
-
-		producer, err := transport.Produce(mediasoup.ProducerOptions{
-			Kind:          requestData.Kind,
-			RtpParameters: requestData.RtpParameters,
-			AppData:       appData,
-			// KeyFrameRequestDelay: 5000,
-		})
-		if err != nil {
-			return err
-		}
-		pipeRouters := r.getRoutersToPipeTo(peer.GetRouterID())
-
-		for routerId, destinationRouter := range r.Routers {
-			has := false
-			for _, rr := range pipeRouters {
-				if rr.Id() == routerId {
-					has = true
-				}
-			}
-			if has {
-				router.PipeToRouter(mediasoup.PipeToRouterOptions{
-					ProducerId: producer.Id(),
-					Router:     destinationRouter,
-				})
-			}
-		}
-		// Store the Producer into the protoo Peer data Object.
-		peer.AddProducer(producer)
-
-		producer.On("score", func(score []mediasoup.ProducerScore) {
-			db := H{
-				"producerId": producer.Id(),
-				"score":      score,
-			}
-			peer.Notify("producerScore", db)
-		})
-		producer.On("videoorientationchange", func(videoOrientation mediasoup.ProducerVideoOrientation) {
-			r.logger.Log(log.DebugLevel, "producerId", producer.Id(), "videoOrientation", videoOrientation, "producer 'videoorientationchange' event")
-		})
-
-		// NOTE: For testing.
-		// producer.EnableTraceEvent("rtp", "keyframe", "nack", "pli", "fir");
-		// producer.EnableTraceEvent("pli", "fir");
-		// producer.EnableTraceEvent("keyframe");
-
-		// producer.On("trace", func(trace mediasoup.ProducerTraceEventData) {
-		// 	r.logger.Debug().
-		// 		Str("producerId", producer.Id()).
-		// 		Str("trace.type", string(trace.Type)).
-		// 		Interface("trace", trace).
-		// 		Msg(`producer "trace" event`)
-		// })getConsumerStats
-
-		accept(H{"id": producer.Id()})
-
-		// Optimization: Create a server-side Consumer for each Peer.
-		for _, otherPeer := range r.getJoinedPeers(peer) {
-			r.createConsumer(otherPeer, peer, producer)
-		}
-
-		// // Add into the audioLevelObserver.
-		if producer.Kind() == mediasoup.MediaKind_Audio {
-			r.AudioLevelObserver.AddProducer(producer.Id())
-		}
-
-	case "closeProducer":
-		// Ensure the Peer is joined.
-		if !peer.GetJoined() {
-			return ErrPeerNotJoined
-		}
-		var requestData struct {
-			ProducerId string
-		}
-		if err := json.Unmarshal(req.Data, &requestData); err != nil {
-			return errors.BadRequest("BAD_DATA_FORMAT", "Bad Data format", err)
-		}
-		producer, ok := peer.GetProducer(requestData.ProducerId)
-		if !ok {
-			return ErrProducerNotFound(requestData.ProducerId)
-		}
+	// // Add into the audioLevelObserver.
+	if producer.Kind() == mediasoup.MediaKind_Audio {
+		r.AudioLevelObserver.AddProducer(producer.Id())
+	}
+	return producer.Id(), nil
+}
+func (r *Room) HandleProducer(peer *Peer, producerId string, action v1.Action) error {
+	// Ensure the Peer is joined.
+	if !peer.GetJoined() {
+		return ErrPeerNotJoined
+	}
+	producer, ok := peer.GetProducer(producerId)
+	if !ok {
+		return ErrProducerNotFound(producerId)
+	}
+	switch action {
+	case v1.Action_CLOSE:
 		producer.Close()
 		peer.RemoveProducer(producer.Id())
-
-		accept(nil)
-
-	case "pauseProducer":
-		// Ensure the Peer is joined.
-		if !peer.GetJoined() {
-			return ErrPeerNotJoined
-		}
-		var requestData struct {
-			ProducerId string
-		}
-		if err := json.Unmarshal(req.Data, &requestData); err != nil {
-			return errors.BadRequest("BAD_DATA_FORMAT", "Bad Data format", err)
-		}
-		producer, ok := peer.GetProducer(requestData.ProducerId)
-		if !ok {
-			return ErrProducerNotFound(requestData.ProducerId)
-		}
-		if err := producer.Pause(); err != nil {
-			return err
-		}
-
-		accept(nil)
-
-	case "resumeProducer":
-		// Ensure the Peer is joined.
-		if !peer.GetJoined() {
-			return ErrPeerNotJoined
-		}
-		var requestData struct {
-			ProducerId string
-		}
-		if err := json.Unmarshal(req.Data, &requestData); err != nil {
-			return errors.BadRequest("BAD_DATA_FORMAT", "Bad Data format", err)
-		}
-		producer, ok := peer.GetProducer(requestData.ProducerId)
-		if !ok {
-			return ErrProducerNotFound(requestData.ProducerId)
-		}
-		if err := producer.Pause(); err != nil {
-			return err
-		}
-
-		accept(nil)
-
-	case "pauseConsumer":
-		// Ensure the Peer is joined.
-		if !peer.GetJoined() {
-			return ErrPeerNotJoined
-		}
-		var requestData struct {
-			ConsumerId string
-		}
-		if err := json.Unmarshal(req.Data, &requestData); err != nil {
-			return errors.BadRequest("BAD_DATA_FORMAT", "Bad Data format", err)
-		}
-		consumer, ok := peer.GetConsumer(requestData.ConsumerId)
-		if !ok {
-			return ErrConsumerNotFound(requestData.ConsumerId)
-		}
-		if err := consumer.Pause(); err != nil {
-			return err
-		}
-
-		accept(nil)
-
-	case "resumeConsumer":
-		// Ensure the Peer is joined.
-		if !peer.GetJoined() {
-			return ErrPeerNotJoined
-		}
-		var requestData struct {
-			ConsumerId string
-		}
-		if err := json.Unmarshal(req.Data, &requestData); err != nil {
-			return errors.BadRequest("BAD_DATA_FORMAT", "Bad Data format", err)
-		}
-		consumer, ok := peer.GetConsumer(requestData.ConsumerId)
-		if !ok {
-			return ErrConsumerNotFound(requestData.ConsumerId)
-		}
-		if err := consumer.Resume(); err != nil {
-			return err
-		}
-
-		accept(nil)
-
-	case "setConsumerPreferredLayers":
-		// Ensure the Peer is joined.
-		if !peer.GetJoined() {
-			return ErrPeerNotJoined
-		}
-		var requestData struct {
-			mediasoup.ConsumerLayers
-			ConsumerId string
-		}
-		if err := json.Unmarshal(req.Data, &requestData); err != nil {
-			return errors.BadRequest("BAD_DATA_FORMAT", "Bad Data format")
-		}
-		consumer, ok := peer.GetConsumer(requestData.ConsumerId)
-		if !ok {
-			return ErrConsumerNotFound(requestData.ConsumerId)
-		}
-		if err := consumer.SetPreferredLayers(requestData.ConsumerLayers); err != nil {
-			return err
-		}
-
-		accept(nil)
-
-	case "setConsumerPriority":
-		if !peer.GetJoined() {
-			return ErrPeerNotJoined
-		}
-		var requestData struct {
-			ConsumerId string
-			Priority   uint32
-		}
-		if err := json.Unmarshal(req.Data, &requestData); err != nil {
-			return errors.BadRequest("BAD_DATA_FORMAT", "Bad Data format", err)
-		}
-		consumer, ok := peer.GetConsumer(requestData.ConsumerId)
-		if !ok {
-			return ErrConsumerNotFound(requestData.ConsumerId)
-		}
-		if err := consumer.SetPriority(requestData.Priority); err != nil {
-			return err
-		}
-
-		accept(nil)
-
-	case "requestConsumerKeyFrame":
-		// Ensure the Peer is joined.
-		if !peer.GetJoined() {
-			return ErrPeerNotJoined
-		}
-		var requestData struct {
-			ConsumerId string
-		}
-		if err := json.Unmarshal(req.Data, &requestData); err != nil {
-			return errors.BadRequest("BAD_DATA_FORMAT", "Bad Data format", err)
-		}
-		consumer, ok := peer.GetConsumer(requestData.ConsumerId)
-		if !ok {
-			return ErrConsumerNotFound(requestData.ConsumerId)
-		}
-		if err := consumer.RequestKeyFrame(); err != nil {
-			return err
-		}
-
-		accept(nil)
-
-	// case "produceData":
-	// 	// Ensure the Peer is joined.
-	// 	if !peer.GetJoined() {
-	// 		return ErrPeerNotJoined
-	// 	}
-	// 	var requestData struct {
-	// 		TransportId          string                          `json:"transportId,omitempty"`
-	// 		SctpStreamParameters *mediasoup.SctpStreamParameters `json:"sctpStreamParameters,omitempty"`
-	// 		Label                string                          `json:"label,omitempty"`
-	// 		Protocol             string                          `json:"protocol,omitempty"`
-	// 		AppData              H                               `json:"appData,omitempty"`
-	// 	}
-	// 	if err := json.Unmarshal(req.Data, &requestData); err != nil {
-	// 		return errors.BadRequest("BAD_DATA_FORMAT", "Bad Data format", err)
-	// 	}
-	// 	transport, ok := peer.GetTransport(requestData.TransportId)
-	// 	if !ok {
-	// 		return ErrTransportNotFound(requestData.TransportId)
-	// 	}
-	// 	dataProducer, err := transport.ProduceData(mediasoup.DataProducerOptions{
-	// 		SctpStreamParameters: requestData.SctpStreamParameters,
-	// 		Label:                requestData.Label,
-	// 		Protocol:             requestData.Protocol,
-	// 		AppData:              requestData.AppData,
-	// 	})
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// 	peer.prod[dataProducer.Id()] = dataProducer
-
-	// 	accept(H{"id": dataProducer.Id()})
-
-	// 	switch dataProducer.Label() {
-	// 	case "chat":
-	// 		// Create a server-side DataConsumer for each Peer.
-	// 		for _, otherPeer := range r.getJoinedPeers(peer) {
-	// 			r.createDataConsumer(otherPeer, peer, dataProducer)
-	// 		}
-
-	// 	case "bot":
-	// 		// Pass it to the bot.
-	// 		r.bot.HandlePeerDataProducer(dataProducer.Id(), peer)
-	// 	}
-
-	case "changeDisplayName":
-		// Ensure the Peer is joined.
-		if !peer.GetJoined() {
-			return ErrPeerNotJoined
-		}
-		var requestData struct {
-			DisplayName string `json:"displayName,omitempty"`
-		}
-		if err := json.Unmarshal(req.Data, &requestData); err != nil {
-			return errors.BadRequest("BAD_DATA_FORMAT", "Bad Data format", err)
-		}
-		oldDisplayName := peer.GetDisplayName()
-		peer.SetDisplayName(requestData.DisplayName)
-
-		db := H{
-			"peerId":         peer.GetID(),
-			"displayName":    requestData.DisplayName,
-			"oldDisplayName": oldDisplayName,
-		}
-		// Notify to others
-		r.notification(peer, "peerDisplayNameChanged", db, true, false)
-
-		accept(nil)
-
-	case "getTransportStats":
-		// Ensure the Peer is joined.
-		if !peer.GetJoined() {
-			return ErrPeerNotJoined
-		}
-		var requestData struct {
-			TransportId string `json:"transportId,omitempty"`
-		}
-		if err := json.Unmarshal(req.Data, &requestData); err != nil {
-			return errors.BadRequest("BAD_DATA_FORMAT", "Bad Data format", err)
-		}
-		transport, ok := peer.GetTransport(requestData.TransportId)
-		if !ok {
-			return ErrTransportNotFound(requestData.TransportId)
-		}
-		stats, err := transport.GetStats()
-		if err != nil {
-			return err
-		}
-
-		accept(stats)
-
-	case "getProducerStats":
-		var requestData struct {
-			ProducerId string
-		}
-		if err := json.Unmarshal(req.Data, &requestData); err != nil {
-			return errors.BadRequest("BAD_DATA_FORMAT", "Bad Data format", err)
-		}
-		producer, ok := peer.GetProducer(requestData.ProducerId)
-		if !ok {
-			return ErrProducerNotFound(requestData.ProducerId)
-		}
-		stats, err := producer.GetStats()
-		if err != nil {
-			return err
-		}
-
-		accept(stats)
-
-	case "getConsumerStats":
-		var requestData struct {
-			ConsumerId string
-		}
-		if err := json.Unmarshal(req.Data, &requestData); err != nil {
-			return errors.BadRequest("BAD_DATA_FORMAT", "Bad Data format", err)
-		}
-		consumer, ok := peer.GetConsumer(requestData.ConsumerId)
-		if !ok {
-			return ErrConsumerNotFound(requestData.ConsumerId)
-		}
-		stats, err := consumer.GetStats()
-		if err != nil {
-			return err
-		}
-
-		accept(stats)
-
-	// case "getDataProducerStats":
-	// 	var requestData struct {
-	// 		DataProducerId string
-	// 	}
-	// 	if err = PbToStruct(request.Data, &requestData); err != nil {
-	// 		return
-	// 	}
-	// 	dataProducer, ok := peerData.DataProducers[requestData.DataProducerId]
-	// 	if !ok {
-	// 		err = fmt.Errorf(`dataProducer with id "%s" not found`, requestData.DataProducerId)
-	// 		return
-	// 	}
-	// 	stats, err := dataProducer.GetStats()
-	// 	if err != nil {
-	// 		return err
-	// 	}
-
-	// 	accept(stats)
-
-	// case "getDataConsumerStats":
-	// 	var requestData struct {
-	// 		DataConsumerId string
-	// 	}
-	// 	if err = PbToStruct(request.Data, &requestData); err != nil {
-	// 		return
-	// 	}
-	// 	dataConsumer, ok := peerData.DataConsumers[requestData.DataConsumerId]
-	// 	if !ok {
-	// 		err = fmt.Errorf(`dataConsumer with id "%s" not found`, requestData.DataConsumerId)
-	// 		return
-	// 	}
-	// 	stats, err := dataConsumer.GetStats()
-	// 	if err != nil {
-	// 		return err
-	// 	}
-
-	// 	accept(stats)
-
-	case "chatMessage":
-		// TODO chatMessage
-		if !r.hasPermission(peer, permission.SEND_CHAT) {
-			return ErrPeerNotAuthorized
-		}
-		var requestData struct {
-			ChatMessage map[string]interface{} `json:"chatMessage"`
-		}
-		if err := json.Unmarshal(req.Data, &requestData); err != nil {
-			return errors.BadRequest("BAD_DATA_FORMAT", "Bad Data format", err)
-		}
-		r.chatHistory = append(r.chatHistory, requestData.ChatMessage)
-
-		// Notify to others
-		r.notification(peer, "chatMessage", H{
-			"peerId":      peer.GetID(),
-			"chatMessage": requestData.ChatMessage,
-		}, true, false)
-
-		accept(nil)
-
-	case "moderator:clearChat":
-		if !r.hasPermission(peer, permission.MODERATE_CHAT) {
-			return ErrPeerNotAuthorized
-		}
-
-		r.chatHistory = make([]map[string]interface{}, 0)
-
-		// Notify to others
-		r.notification(peer, "moderator:clearChat", nil, true, false)
-
-		accept(nil)
-
-	case "lockRoom":
-		if !r.hasPermission(peer, permission.CHANGE_ROOM_LOCK) {
-			return ErrPeerNotAuthorized
-		}
-
-		r.locked = true
-
-		db := H{
-			"peerId": peer.GetID(),
-		}
-		// Notify to others
-		r.notification(peer, "lockRoom", db, true, false)
-
-		accept(nil)
-
-	case "unlockRoom":
-		if !r.hasPermission(peer, permission.CHANGE_ROOM_LOCK) {
-			return ErrPeerNotAuthorized
-		}
-		r.locked = false
-
-		db := H{
-			"peerId": peer.GetID(),
-		}
-		// Notify to others
-		r.notification(peer, "unlockRoom", db, true, false)
-
-		accept(nil)
-
-	case "setAccessCode":
-		var requestData struct {
-			accessCode int32
-		}
-
-		if err := json.Unmarshal(req.Data, &requestData); err != nil {
-			return errors.BadRequest("BAD_DATA_FORMAT", "Bad Data format", err)
-		}
-
-		r.accessCode = requestData.accessCode
-
-		db := H{
-			"peerId":     peer.GetID(),
-			"accessCode": requestData.accessCode,
-		}
-		// Notify to others
-		r.notification(peer, "setAccessCode", db, true, false)
-
-		accept(nil)
-
-	case "sendFile":
-		if !r.hasPermission(peer, permission.SHARE_FILE) {
-			return ErrPeerNotAuthorized
-		}
-
-		var requestData struct {
-			magnetUri string
-		}
-
-		if err := json.Unmarshal(req.Data, &requestData); err != nil {
-			return errors.BadRequest("BAD_DATA_FORMAT", "Bad Data format", err)
-		}
-
-		db := H{
-			"peerId":    peer.GetID(),
-			"magnetUri": requestData.magnetUri,
-		}
-		// Notify to others
-		r.notification(peer, "sendFile", db, true, false)
-
-		accept(nil)
-
-	case "moderator:clearFileSharing":
-		//TODO clearFileSharing
-		if !r.hasPermission(peer, permission.MODERATE_FILES) {
-			return ErrPeerNotAuthorized
-		}
-		r.fileHistory = []string{}
-
-		// Notify to others
-		r.notification(peer, "moderator:clearFileSharing", nil, true, false)
-
-		accept(nil)
-
-	case "raiseHand":
-		var requestData struct {
-			raisedHand bool
-		}
-
-		if err := json.Unmarshal(req.Data, &requestData); err != nil {
-			return errors.BadRequest("BAD_DATA_FORMAT", "Bad Data format", err)
-		}
-
-		peer.SetRaisedHand(requestData.raisedHand)
-
-		db := H{
-			"peerId":              peer.GetID(),
-			"raisedHand":          requestData.raisedHand,
-			"raisedHandTimestamp": peer.GetRaisedHandTimestamp(),
-		}
-
-		// Notify to others
-		r.notification(peer, "raiseHand", db, true, false)
-
-		accept(nil)
-
-	case "moderator:mute":
-		if !r.hasPermission(peer, permission.MODERATE_ROOM) {
-			return ErrPeerNotAuthorized
-		}
-
-		var requestData struct {
-			peerId string
-		}
-
-		if err := json.Unmarshal(req.Data, &requestData); err != nil {
-			return errors.BadRequest("BAD_DATA_FORMAT", "Bad Data format", err)
-		}
-
-		id, err := uuid.FromString(requestData.peerId)
-
-		if err != nil {
-			return err
-		}
-
-		mutePeer := r.GetPeer(id)
-
-		if mutePeer == nil {
-			return ErrPeerNotFound(requestData.peerId)
-		}
-
-		r.notification(mutePeer, "moderator:mutePeer", nil, false, false)
-
-		accept(nil)
-
-	case "moderator:muteAll":
-		if !r.hasPermission(peer, permission.MODERATE_ROOM) {
-			return ErrPeerNotAuthorized
-		}
-
-		// Notify to others
-		r.notification(peer, "moderator:muteAll", nil, true, false)
-
-		accept(nil)
-
-	case "moderator:stopVideo":
-		if !r.hasPermission(peer, permission.MODERATE_ROOM) {
-			return ErrPeerNotAuthorized
-		}
-
-		var requestData struct {
-			peerId string
-		}
-
-		if err := json.Unmarshal(req.Data, &requestData); err != nil {
-			return errors.BadRequest("BAD_DATA_FORMAT", "Bad Data format", err)
-		}
-
-		id, err := uuid.FromString(requestData.peerId)
-
-		if err != nil {
-			return err
-		}
-
-		stopVideoPeer := r.GetPeer(id)
-
-		if stopVideoPeer == nil {
-			return ErrPeerNotFound(requestData.peerId)
-		}
-
-		r.notification(stopVideoPeer, "moderator:stopVideo", nil, false, false)
-
-		accept(nil)
-
-	case "moderator:stopAllVideo":
-		if !r.hasPermission(peer, permission.MODERATE_ROOM) {
-			return ErrPeerNotAuthorized
-		}
-
-		// Notify to others
-		r.notification(peer, "moderator:stopAllVideo", nil, true, false)
-
-		accept(nil)
-
-	case "moderator:stopAllScreenSharing":
-		if !r.hasPermission(peer, permission.MODERATE_ROOM) {
-			return ErrPeerNotAuthorized
-		}
-
-		// Notify to others
-		r.notification(peer, "moderator:stopAllScreenSharing", nil, true, false)
-
-		accept(nil)
-
-	case "moderator:stopScreenSharing":
-		if !r.hasPermission(peer, permission.MODERATE_ROOM) {
-			return ErrPeerNotAuthorized
-		}
-
-		var requestData struct {
-			peerId string
-		}
-
-		if err := json.Unmarshal(req.Data, &requestData); err != nil {
-			return errors.BadRequest("BAD_DATA_FORMAT", "Bad Data format", err)
-		}
-
-		id, err := uuid.FromString(requestData.peerId)
-
-		if err != nil {
-			return err
-		}
-
-		stopVideoPeer := r.GetPeer(id)
-
-		if stopVideoPeer == nil {
-			return ErrPeerNotFound(requestData.peerId)
-		}
-
-		r.notification(peer, "moderator:stopScreenSharing", nil, false, false)
-
-		accept(nil)
-
-	case "moderator:closeMeeting":
-		if !r.hasPermission(peer, permission.MODERATE_ROOM) {
-			return ErrPeerNotAuthorized
-		}
-
-		// Notify to others
-		r.notification(peer, "moderator:kick", nil, true, false)
-
-		r.Close()
-
-		accept(nil)
-
-	case "moderator:kickPeer":
-		if !r.hasPermission(peer, permission.MODERATE_ROOM) {
-			return ErrPeerNotAuthorized
-		}
-
-		var requestData struct {
-			peerId string
-		}
-
-		if err := json.Unmarshal(req.Data, &requestData); err != nil {
-			return errors.BadRequest("BAD_DATA_FORMAT", "Bad Data format", err)
-		}
-
-		id, err := uuid.FromString(requestData.peerId)
-
-		if err != nil {
-			return err
-		}
-
-		kickPeer := r.GetPeer(id)
-
-		if kickPeer == nil {
-			return ErrPeerNotFound(requestData.peerId)
-		}
-
-		r.notification(peer, "moderator:kickPeer", nil, false, false)
-
-		kickPeer.Close()
-
-		accept(nil)
-
-	case "moderator:lowerHand":
-		if !r.hasPermission(peer, permission.MODERATE_ROOM) {
-			return ErrPeerNotAuthorized
-		}
-
-		var requestData struct {
-			peerId string
-		}
-
-		if err := json.Unmarshal(req.Data, &requestData); err != nil {
-			return errors.BadRequest("BAD_DATA_FORMAT", "Bad Data format", err)
-		}
-
-		id, err := uuid.FromString(requestData.peerId)
-
-		if err != nil {
-			return err
-		}
-
-		lowerPeer := r.GetPeer(id)
-
-		if lowerPeer == nil {
-			return ErrPeerNotFound(requestData.peerId)
-		}
-
-		r.notification(peer, "moderator:lowerHand", nil, false, false)
-
-		accept(nil)
-
-	case "applyNetworkThrottle":
-		//TODO: throttle.start
-
-	case "resetNetworkThrottle":
-		//TODO: throttle.stop
-
+	case v1.Action_PAUSE:
+		return producer.Pause()
+	case v1.Action_RESUME:
+		return producer.Resume()
 	default:
-		r.logger.Logf(log.ErrorLevel, "unknown request.method %s", req.Method)
-		return ErrMethodUnknown
+		return ErrActionNotDefined
 	}
 	return nil
 }
+func (r *Room) HandleConsumer(peer *Peer, consumerId string, action v1.Action) ([]byte, error) {
+	// Ensure the Peer is joined.
+	if !peer.GetJoined() {
+		return nil, ErrPeerNotJoined
+	}
+	consumer, ok := peer.GetConsumer(consumerId)
+	if !ok {
+		return nil, ErrConsumerNotFound(consumerId)
+	}
+	var data []byte
+	switch action {
+	case v1.Action_CLOSE:
+		consumer.Close()
+		peer.RemoveProducer(consumer.Id())
+	case v1.Action_PAUSE:
+		err := consumer.Pause()
+		if err != nil {
+			return nil, err
+		}
+	case v1.Action_RESUME:
+		err := consumer.Resume()
+		if err != nil {
+			return nil, err
+		}
+		data, _ = json.Marshal(consumer.Score())
+	default:
+		return nil, ErrActionNotDefined
+	}
+	return data, nil
+}
+
+func (r *Room) GetStats(peer *Peer, id string, statsType v1.StatsType) (*v1.GetStatsResponse, error) {
+	// Ensure the Peer is joined.
+	if !peer.GetJoined() {
+		return nil, ErrPeerNotJoined
+	}
+	switch statsType {
+	case v1.StatsType_TRANSPORT:
+		transport, ok := peer.GetTransport(id)
+		if !ok {
+			return nil, ErrTransportNotFound(id)
+		}
+		stats, err := transport.GetStats()
+		if err != nil {
+			return nil, err
+		}
+		statsData, _ := json.Marshal(stats)
+		return &v1.GetStatsResponse{
+			Stats: statsData,
+		}, nil
+	case v1.StatsType_PRODUCER:
+		producer, ok := peer.GetProducer(id)
+		if !ok {
+			return nil, ErrProducerNotFound(id)
+		}
+		stats, err := producer.GetStats()
+		if err != nil {
+			return nil, err
+		}
+		statsData, _ := json.Marshal(stats)
+		return &v1.GetStatsResponse{
+			Stats: statsData,
+		}, nil
+	case v1.StatsType_CONSUMER:
+		consumer, ok := peer.GetConsumer(id)
+		if !ok {
+			return nil, ErrConsumerNotFound(id)
+		}
+		stats, err := consumer.GetStats()
+		if err != nil {
+			return nil, err
+		}
+		statsData, _ := json.Marshal(stats)
+		return &v1.GetStatsResponse{
+			Stats: statsData,
+		}, nil
+	default:
+		return nil, ErrStatsTypeNotDefined
+	}
+}
 
 // Creates a mediasoup Consumer for the given mediasoup Producer.
-func (r *Room) createConsumer(consumerPeer, producerPeer *Peer, producer *mediasoup.Producer) {
+func (r *Room) CreateConsumer(consumerPeer, producerPeer *Peer, producer *mediasoup.Producer) (*v1.ConsumeResponse, error) {
 	r.logger.Logf(log.DebugLevel, "createConsumer() [consumerPeer:%s, producerPeer:%s, producer:%s]",
 		consumerPeer.GetID(),
 		producerPeer.GetID(),
@@ -1386,9 +645,10 @@ func (r *Room) createConsumer(consumerPeer, producerPeer *Peer, producer *medias
 	// consumerPeerData := consumerPeer.data
 
 	// NOTE: Don"t create the Consumer if the remote Peer cannot consume it.
+	// TODO: check this on core level
 	if consumerPeer.GetRtpCapabilities() == nil ||
 		!producerPeer.router.CanConsume(producer.Id(), *consumerPeer.GetRtpCapabilities()) {
-		return
+		return nil, ErrUnableToConsume
 	}
 
 	// Must take the Transport the remote Peer is using for consuming.
@@ -1396,7 +656,7 @@ func (r *Room) createConsumer(consumerPeer, producerPeer *Peer, producer *medias
 	// This should not happen.
 	if transport == nil {
 		r.logger.Log(log.WarnLevel, "createConsumer() | Transport for consuming not found")
-		return
+		return nil, ErrConsumingTransportNotFound
 	}
 
 	consumer, err := transport.Consume(mediasoup.ConsumerOptions{
@@ -1405,9 +665,10 @@ func (r *Room) createConsumer(consumerPeer, producerPeer *Peer, producer *medias
 		Paused:          producer.Kind() == mediasoup.MediaKind_Video,
 		AppData:         producer.AppData(),
 	})
+
 	if err != nil {
 		r.logger.Logf(log.ErrorLevel, "createConsumer() | transport.consume() Error: %v", err)
-		return
+		return nil, err
 	}
 
 	if producer.Kind() == mediasoup.MediaKind_Audio {
@@ -1468,70 +729,18 @@ func (r *Room) createConsumer(consumerPeer, producerPeer *Peer, producer *medias
 	// 		Interface("trace", trace).
 	// 		Msg(`consumer "trace" event`)
 	// })
+	rtpParameters, _ := json.Marshal(consumer.RtpParameters())
+	appData, _ := json.Marshal(consumer.AppData())
 
-	go func() {
-		// Send a request to the remote Peer with Consumer parameters.
-		rsp := consumerPeer.Request("newConsumer", H{
-			"peerId":         producerPeer.GetID(),
-			"producerId":     producer.Id(),
-			"id":             consumer.Id(),
-			"kind":           consumer.Kind(),
-			"rtpParameters":  consumer.RtpParameters(),
-			"type":           consumer.Type(),
-			"appData":        consumer.AppData(),
-			"producerPaused": consumer.ProducerPaused(),
-		})
-		if rsp.Err() != nil {
-			r.logger.Logf(log.WarnLevel, "createConsumer() | failed: %v", rsp.Err)
-			return
-		}
+	return &v1.ConsumeResponse{
+		ConsumerId:     consumer.Id(),
+		MediaKind:      string(consumer.Kind()),
+		RtpParameters:  rtpParameters,
+		ConsumerType:   string(consumer.Type()),
+		ProducerPaused: consumer.ProducerPaused(),
+		AppData:        appData,
+	}, nil
 
-		// Now that we got the positive response from the remote endpoint, resume
-		// the Consumer so the remote endpoint will receive the a first RTP packet
-		// of this new stream once its PeerConnection is already ready to process
-		// and associate it.
-		if err = consumer.Resume(); err != nil {
-			r.logger.Logf(log.WarnLevel, "createConsumer() | failed: %v", err)
-			return
-		}
-		consumerPeer.Notify("consumerScore", H{
-			"consumerId": consumer.Id(),
-			"score":      consumer.Score(),
-		})
-	}()
-
-}
-
-func (r *Room) hasPermission(peer *Peer, perm permission.Permission) bool {
-
-	for _, role := range peer.roles {
-		if r, ok := permission.RoomPermissions[perm]; ok {
-			for _, rr := range r {
-				if rr == role {
-					return true
-				}
-			}
-		}
-	}
-	for _, p := range permission.AllowWhenRoleMissing {
-		if p == perm && len(r.getPeersWithPermission(perm, nil, false)) == 0 {
-			return true
-		}
-	}
-	return false
-}
-
-func (r *Room) hasAccess(peer *Peer, access permission.Access) bool {
-	for _, r := range peer.roles {
-		if rr, ok := permission.RoomAccess[access]; ok {
-			for _, role := range rr {
-				if role == r {
-					return true
-				}
-			}
-		}
-	}
-	return false
 }
 
 // getJoinedPeers returns joined peers
@@ -1540,33 +749,6 @@ func (r *Room) getJoinedPeers(excludePeer *Peer) []*Peer {
 	r.locker.RLock()
 	for _, p := range r.peers {
 		if p.GetJoined() && !MatchPeer(p, excludePeer) {
-			peers = append(peers, p)
-		}
-	}
-	r.locker.RUnlock()
-	return peers
-}
-
-func (r *Room) getAllowedPeers(perm permission.Permission, excludePeer *Peer, joined bool) []*Peer {
-	//joined =true
-	peers := r.getPeersWithPermission(perm, excludePeer, joined)
-	if len(peers) > 0 {
-		return peers
-	}
-	for _, perms := range permission.AllowWhenRoleMissing {
-		if perm == perms {
-			return r.Peers()
-		}
-	}
-	return peers
-}
-
-func (r *Room) getPeersWithPermission(perm permission.Permission, excludePeer *Peer, joined bool) []*Peer {
-	//joined =true
-	var peers []*Peer
-	r.locker.RLock()
-	for _, p := range r.peers {
-		if p.joined == joined && MatchPeer(p, excludePeer) && r.hasPermission(p, perm) {
 			peers = append(peers, p)
 		}
 	}
@@ -1597,6 +779,7 @@ func (r *Room) notification(peer *Peer, message string, data interface{}, broadc
 func (r *Room) GetLeastLoadedRouter(excludePeer ...*Peer) *mediasoup.Router {
 	router, _ := getNextRouter(r.Peers(), r.Routers, excludePeer...)
 	r.pipeProducersToRouter(router, excludePeer...)
+	// r.handleRemoteRouterPipeTransport(router)
 	return router
 }
 
@@ -1637,6 +820,287 @@ func (r *Room) getRoutersToPipeTo(originRouterId string) []*mediasoup.Router {
 	}
 	return routers
 }
+
+// func (r *Room) handleRemoteRouterPipeTransport(router *mediasoup.Router) {
+// 	nodes := r.getRemoteRoutersToPipeTo()
+// 	for _, node := range nodes {
+// 		if node.ID != r.NodeID && len(node.Routers) > 0 {
+// 			for _, routerid := range node.Routers {
+// 				cid := uuid.NewV4()
+// 				err := r.event.Publish(context.TODO(), event.CreateEventRequest(r.RoomName, r.NodeID, "scale/createPipeTransport", H{"router_id": routerid, "cid": cid.String()}))
+// 				if err != nil {
+// 					r.logger.Log(log.ErrorLevel, err)
+// 					break
+// 				}
+// 				payload, err := r.CreatePipeTransport(router, mediasoup.PipeTransportOptions{
+// 					ListenIp:   DefaultConfig.Mediasoup.WebRtcTransportOptions.ListenIps[0],
+// 					EnableSrtp: true,
+// 					EnableRtx:  true,
+// 					AppData: H{
+// 						"cid": cid.String(),
+// 					},
+// 				})
+// 				if err != nil {
+// 					r.logger.Log(log.ErrorLevel, err)
+// 					break
+// 				}
+// 				msg := event.CreateEventRequest(r.RoomName, r.NodeID, "scale/connectPipeTransport", payload)
+// 				err = r.event.Publish(context.TODO(), msg)
+// 				if err != nil {
+// 					r.logger.Log(log.ErrorLevel, err)
+// 					r.mapPipeTransportQueue.Delete(payload.TransportID)
+// 				}
+// 			}
+
+// 		}
+// 	}
+// }
+
+// func (r *Room) getRemoteRoutersToPipeTo() (nodes Nodes) {
+// 	// TODO
+// 	record, err := r.store.Read(r.RoomName)
+// 	if err != nil {
+// 		if err == store.ErrNotFound {
+// 			return
+// 		}
+// 		log.Error(err)
+// 		return
+// 	}
+// 	var room StoreRoom
+// 	if len(record) == 0 {
+// 		return
+// 	}
+// 	err = json.Unmarshal(record[0].Value, &room)
+// 	if err != nil {
+// 		log.Error(err)
+// 		return
+// 	}
+// 	nodes = room.Nodes
+// 	return
+// }
+
+// // TODO:
+// func (r *Room) handleRoomScaling(msg *v1.Message) error {
+// 	if msg.Error != "" {
+// 		return errors.New("EVENT_ERROR", msg.Error, 500)
+// 	}
+// 	if msg.NodeId == r.NodeID {
+// 		return nil
+// 	}
+// 	switch msg.Sub {
+// 	case "scale/createPipeTransport":
+// 		var payload struct {
+// 			RouterID string `json:"router_id"`
+// 			Cid      string `json:"cid"`
+// 		}
+// 		if err := json.Unmarshal(msg.Data, &payload); err != nil {
+// 			return err
+// 		}
+// 		srcRouter, ok := r.Routers[payload.RouterID]
+// 		if !ok {
+// 			return errors.NotFound("ROUTER_NOT_FOUND", "router not found")
+// 		}
+// 		data, err := r.CreatePipeTransport(srcRouter, mediasoup.PipeTransportOptions{
+// 			ListenIp:   DefaultConfig.Mediasoup.WebRtcTransportOptions.ListenIps[0],
+// 			EnableSrtp: true,
+// 			EnableRtx:  true,
+// 			AppData: H{
+// 				"cid": payload.Cid,
+// 			},
+// 		})
+// 		if err != nil {
+// 			return err
+// 		}
+// 		return r.event.Publish(context.TODO(), event.CreateEventRequest(r.RoomName, r.NodeID, "scale/connectPipeTransport", data))
+
+// 	case "scale/connectPipeTransport":
+// 		var payload ConnectPipeRouterPayload
+// 		if err := json.Unmarshal(msg.Data, &payload); err != nil {
+// 			return err
+// 		}
+// 		r.ConnectPipeTransport(payload)
+// 	case "scale/pipeTransportClose":
+// 	case "scale/producePipeTransport":
+// 		var payload ProducePipeTransportPayload
+// 		if err := json.Unmarshal(msg.Data, &payload); err != nil {
+// 			return err
+// 		}
+// 		r.producePipeTransport(payload)
+
+// 	}
+// 	return nil
+// }
+
+// func (r *Room) CreatePipeTransport(srcRouter *mediasoup.Router, opts mediasoup.PipeTransportOptions) (ConnectPipeRouterPayload, error) {
+// 	localPipeTransport, err := srcRouter.CreatePipeTransport(opts)
+// 	if err != nil {
+// 		return ConnectPipeRouterPayload{}, err
+// 	}
+// 	r.mapPipeTransportQueue.Store(localPipeTransport.Id(), localPipeTransport)
+// 	var appData H
+// 	if opts.AppData != nil {
+// 		appData = opts.AppData.(H)
+// 	}
+// 	return ConnectPipeRouterPayload{
+// 		TransportID:    localPipeTransport.Id(),
+// 		Cid:            appData["cid"].(string),
+// 		Tuple:          localPipeTransport.Tuple(),
+// 		SrtpParameters: localPipeTransport.SrtpParameters(),
+// 	}, nil
+// }
+
+// func (r *Room) ConnectPipeTransport(data ConnectPipeRouterPayload) {
+// 	var transport *mediasoup.PipeTransport
+// 	r.mapPipeTransportQueue.Range(func(key, value interface{}) bool {
+// 		tt, ok := value.(*mediasoup.PipeTransport)
+// 		if ok {
+// 			log.Info(tt, tt.AppData())
+// 			log.Infof("type: %T", tt.AppData())
+// 			appData, _ := tt.AppData().(H)
+// 			id := appData["cid"].(string)
+// 			if id == data.Cid {
+// 				transport = tt
+// 				return false
+// 			}
+// 		}
+// 		return true
+// 	})
+// 	if transport == nil {
+// 		return
+// 	}
+// 	err := transport.Connect(mediasoup.TransportConnectOptions{
+// 		Ip:             data.Tuple.LocalIp,
+// 		Port:           data.Tuple.LocalPort,
+// 		SrtpParameters: data.SrtpParameters,
+// 	})
+// 	if err != nil {
+// 		r.logger.Log(log.ErrorLevel, err)
+// 		r.mapPipeTransportQueue.Delete(transport.Id())
+// 		return
+// 	}
+// 	transport.Observer().On("close", func() {
+// 		err := r.event.Publish(context.TODO(), event.CreateEventRequest(r.RoomName, r.NodeID, "scale/pipeTransportClose", H{"transport_id": transport.Id()}))
+// 		if err != nil {
+// 			r.logger.Log(log.ErrorLevel, err)
+// 		}
+// 	})
+// 	r.mapPipeTransports.Store(transport.Id(), PipeTransportPair{localPipeTransport: transport, remotePipeTransportID: data.TransportID})
+// 	r.mapPipeTransportQueue.Delete(transport.Id())
+// 	r.Emit("pipeTransportConnected", transport.Id())
+// }
+
+// func (r *Room) handlePipeTransportConnect(transportId string) {
+// 	for _, peer := range r.Peers() {
+// 		for _, producer := range peer.GetProducers() {
+// 			r.pipeProducerToRemoteRouter(producer, transportId)
+// 		}
+// 	}
+// }
+
+// func (r *Room) pipeProducerToRemoteRouter(producer *mediasoup.Producer, transportId string) (result *mediasoup.PipeToRouterResult, err error) {
+
+// 	var pipeConsumer *mediasoup.Consumer
+
+// 	defer func() {
+// 		if err != nil {
+// 			r.logger.Logf(log.ErrorLevel, "pipeToRouter() | error creating pipe Consumer/Producer pair:%s", err)
+
+// 			if pipeConsumer != nil {
+// 				pipeConsumer.Close()
+// 			}
+// 		}
+// 	}()
+
+// 	transport, ok := r.mapPipeTransports.Load(transportId)
+// 	if !ok {
+// 		return
+// 	}
+// 	transportPair := transport.(PipeTransportPair)
+// 	localPipeTransport := transportPair.localPipeTransport
+
+// 	pipeConsumer, err = localPipeTransport.Consume(mediasoup.ConsumerOptions{
+// 		ProducerId: producer.Id(),
+// 	})
+// 	if err != nil {
+// 		return
+// 	}
+// 	// Tell remote producer to consume
+// 	msg := event.CreateEventRequest(r.RoomName, r.NodeID, "scale/producePipeTransport", ProducePipeTransportPayload{
+// 		ProducerID:     producer.Id(),
+// 		Kind:           pipeConsumer.Kind(),
+// 		RtpParameters:  pipeConsumer.RtpParameters(),
+// 		Paused:         pipeConsumer.ProducerPaused(),
+// 		AppData:        producer.AppData(),
+// 		TransportID:    transportPair.remotePipeTransportID,
+// 		PipeConsumerID: pipeConsumer.Id(),
+// 	})
+
+// 	err = r.event.Publish(context.TODO(), msg)
+// 	if err != nil {
+// 		return
+// 	}
+
+// 	// Ensure that the producer has not been closed in the meanwhile.
+// 	if producer.Closed() {
+// 		err = mediasoup.NewInvalidStateError("original Producer closed")
+// 		return
+// 	}
+
+// 	// Pipe events from the pipe Consumer to the pipe Producer.
+// 	pipeConsumer.Observer().On("close", func() {
+// 		// close pipeProducer on remote
+// 		r.event.Publish(context.TODO(), event.CreateEventRequest(r.RoomName, r.NodeID, "scale/pipeProducer.close", producer.Id()))
+
+// 	})
+// 	pipeConsumer.Observer().On("pause", func() {
+// 		// pause pipeProducer on remote
+// 		r.event.Publish(context.TODO(), event.CreateEventRequest(r.RoomName, r.NodeID, "scale/pipeProducer.pause", producer.Id()))
+
+// 	})
+// 	pipeConsumer.Observer().On("resume", func() {
+// 		// resume pipeProducer on remote
+// 		r.event.Publish(context.TODO(), event.CreateEventRequest(r.RoomName, r.NodeID, "scale/pipeProducer.resume", producer.Id()))
+
+// 	})
+
+// 	// fire pipeconsumer close if pipeProducer gets close in remote router
+// 	// Pipe events from the pipe Producer to the pipe Consumer.
+// 	// pipeProducer.Observer().On("close", func() { pipeConsumer.Close() })
+// 	r.mapPipeConsumers.Store(pipeConsumer.Id(), pipeConsumer)
+// 	result = &mediasoup.PipeToRouterResult{
+// 		PipeConsumer: pipeConsumer,
+// 	}
+
+// 	return
+// }
+
+// func (r *Room) producePipeTransport(payload ProducePipeTransportPayload) {
+// 	var transport *mediasoup.PipeTransport
+// 	iTransport, ok := r.mapPipeTransports.Load(payload.TransportID)
+// 	if !ok {
+// 		return
+// 	}
+// 	transport = iTransport.(*mediasoup.PipeTransport)
+// 	if transport == nil {
+// 		return
+// 	}
+// 	pipeProducer, err := transport.Produce(mediasoup.ProducerOptions{
+// 		Id:            payload.ProducerID,
+// 		Kind:          payload.Kind,
+// 		RtpParameters: payload.RtpParameters,
+// 		Paused:        payload.Paused,
+// 		AppData:       payload.AppData,
+// 	})
+// 	if err != nil {
+// 		r.logger.Log(log.ErrorLevel, err)
+// 		return
+// 	}
+// 	pipeProducer.Observer().On("close", func() {
+// 		r.event.Publish(context.TODO(), event.CreateEventRequest(r.RoomName, r.NodeID, "scale/pipeProducer.close", H{"pipeConsumerId": payload.PipeConsumerID}))
+// 		r.mapPipeProducers.Delete(pipeProducer.Id())
+// 	})
+// 	r.mapPipeProducers.Store(pipeProducer.Id(), pipeProducer)
+// }
 
 func getNextRouter(peers []*Peer, routers map[string]*mediasoup.Router, excludePeer ...*Peer) (*mediasoup.Router, error) {
 	if len(routers) == 0 {
