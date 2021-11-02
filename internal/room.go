@@ -313,7 +313,7 @@ func (r *Room) SetRtpCapabilities(peer *Peer, rtpCapabilities *mediasoup.RtpCapa
 	peer.SetRtpCapabilities(rtpCapabilities)
 }
 
-func (r *Room) CreateWebRtcTransport(peer *Peer, opt CreateWebRtcTransportOption) (*v1.CreateWebRtcTransportResponse, error) {
+func (r *Room) CreateWebRtcTransport(peer *Peer, opt CreateWebRtcTransportOption) (*CreateWebrtcTransportResponse, error) {
 	webRtcTransportOptions := mediasoup.WebRtcTransportOptions{}
 	err := utils.Clone(&webRtcTransportOptions, DefaultConfig.Mediasoup.WebRtcTransportOptions)
 	if err != nil {
@@ -379,17 +379,12 @@ func (r *Room) CreateWebRtcTransport(peer *Peer, opt CreateWebRtcTransportOption
 			return nil, err
 		}
 	}
-	iceParameters, _ := json.Marshal(transport.IceParameters())
-	iceCandidates, _ := json.Marshal(transport.IceCandidates())
-	dtlsParameters, _ := json.Marshal(transport.DtlsParameters())
-	sctpParameters, _ := json.Marshal(transport.SctpParameters())
-
-	return &v1.CreateWebRtcTransportResponse{
+	return &CreateWebrtcTransportResponse{
 		TransportId:    transport.Id(),
-		IceParameters:  iceParameters,
-		IceCandidates:  iceCandidates,
-		DtlsParameters: dtlsParameters,
-		SctpParameters: sctpParameters,
+		IceParameters:  transport.IceParameters(),
+		IceCandidates:  transport.IceCandidates(),
+		DtlsParameters: transport.DtlsParameters(),
+		SctpParameters: transport.SctpParameters(),
 	}, nil
 
 }
@@ -404,7 +399,7 @@ func (r *Room) ConnectWebRtcTransport(peer *Peer, opt ConnectWebRtcTransportOpti
 	})
 }
 
-func (r *Room) RestartICE(peer *Peer, opt RestartICEOption) (*v1.RestartIceResponse, error) {
+func (r *Room) RestartICE(peer *Peer, opt RestartICEOption) (*mediasoup.IceParameters, error) {
 	// Ensure the Peer is joined.
 	if !peer.GetJoined() {
 		return nil, ErrPeerNotJoined
@@ -417,10 +412,7 @@ func (r *Room) RestartICE(peer *Peer, opt RestartICEOption) (*v1.RestartIceRespo
 	if err != nil {
 		return nil, err
 	}
-	ice, _ := json.Marshal(iceParameters)
-	return &v1.RestartIceResponse{
-		IceParameters: ice,
-	}, nil
+	return &iceParameters, nil
 }
 
 func (r *Room) Produce(peer *Peer, opt ProduceOption) (string, error) {
@@ -572,11 +564,12 @@ func (r *Room) HandleConsumer(peer *Peer, consumerId string, action v1.Action) (
 	return data, nil
 }
 
-func (r *Room) GetStats(peer *Peer, id string, statsType v1.StatsType) (*v1.GetStatsResponse, error) {
+func (r *Room) GetStats(peer *Peer, id string, statsType v1.StatsType) ([]byte, error) {
 	// Ensure the Peer is joined.
 	if !peer.GetJoined() {
 		return nil, ErrPeerNotJoined
 	}
+	var statsData []byte
 	switch statsType {
 	case v1.StatsType_TRANSPORT:
 		transport, ok := peer.GetTransport(id)
@@ -587,10 +580,7 @@ func (r *Room) GetStats(peer *Peer, id string, statsType v1.StatsType) (*v1.GetS
 		if err != nil {
 			return nil, err
 		}
-		statsData, _ := json.Marshal(stats)
-		return &v1.GetStatsResponse{
-			Stats: statsData,
-		}, nil
+		statsData, _ = json.Marshal(stats)
 	case v1.StatsType_PRODUCER:
 		producer, ok := peer.GetProducer(id)
 		if !ok {
@@ -600,10 +590,7 @@ func (r *Room) GetStats(peer *Peer, id string, statsType v1.StatsType) (*v1.GetS
 		if err != nil {
 			return nil, err
 		}
-		statsData, _ := json.Marshal(stats)
-		return &v1.GetStatsResponse{
-			Stats: statsData,
-		}, nil
+		statsData, _ = json.Marshal(stats)
 	case v1.StatsType_CONSUMER:
 		consumer, ok := peer.GetConsumer(id)
 		if !ok {
@@ -613,17 +600,15 @@ func (r *Room) GetStats(peer *Peer, id string, statsType v1.StatsType) (*v1.GetS
 		if err != nil {
 			return nil, err
 		}
-		statsData, _ := json.Marshal(stats)
-		return &v1.GetStatsResponse{
-			Stats: statsData,
-		}, nil
+		statsData, _ = json.Marshal(stats)
 	default:
 		return nil, ErrStatsTypeNotDefined
 	}
+	return statsData, nil
 }
 
 // Creates a mediasoup Consumer for the given mediasoup Producer.
-func (r *Room) CreateConsumer(consumerPeer, producerPeer *Peer, producer *mediasoup.Producer) (*v1.ConsumeResponse, error) {
+func (r *Room) CreateConsumer(consumerPeer, producerPeer *Peer, producer *mediasoup.Producer) (*CreateConsumerResponse, error) {
 	r.logger.Logf(log.DebugLevel, "createConsumer() [consumerPeer:%s, producerPeer:%s, producer:%s]",
 		consumerPeer.GetID(),
 		producerPeer.GetID(),
@@ -729,16 +714,14 @@ func (r *Room) CreateConsumer(consumerPeer, producerPeer *Peer, producer *medias
 	// 		Interface("trace", trace).
 	// 		Msg(`consumer "trace" event`)
 	// })
-	rtpParameters, _ := json.Marshal(consumer.RtpParameters())
-	appData, _ := json.Marshal(consumer.AppData())
 
-	return &v1.ConsumeResponse{
+	return &CreateConsumerResponse{
 		ConsumerId:     consumer.Id(),
-		MediaKind:      string(consumer.Kind()),
-		RtpParameters:  rtpParameters,
-		ConsumerType:   string(consumer.Type()),
+		MediaKind:      consumer.Kind(),
+		RtpParameters:  consumer.RtpParameters(),
+		ConsumerType:   consumer.Type(),
 		ProducerPaused: consumer.ProducerPaused(),
-		AppData:        appData,
+		AppData:        consumer.AppData(),
 	}, nil
 
 }

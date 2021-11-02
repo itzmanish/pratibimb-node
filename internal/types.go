@@ -228,3 +228,20 @@ type ProduceOption struct {
 	RtpParameters mediasoup.RtpParameters
 	AppData       H
 }
+
+type CreateWebrtcTransportResponse struct {
+	TransportId    string
+	IceParameters  mediasoup.IceParameters
+	IceCandidates  []mediasoup.IceCandidate
+	DtlsParameters mediasoup.DtlsParameters
+	SctpParameters mediasoup.SctpParameters
+}
+
+type CreateConsumerResponse struct {
+	ConsumerId     string
+	MediaKind      mediasoup.MediaKind
+	RtpParameters  mediasoup.RtpParameters
+	ConsumerType   mediasoup.ConsumerType
+	ProducerPaused bool
+	AppData        interface{}
+}
