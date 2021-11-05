@@ -18,6 +18,7 @@ type Peer struct {
 	locker          sync.Mutex
 	ID              uuid.UUID `json:"id"`
 	RoomID          uuid.UUID `json:"room_id"`
+	RoomName        string
 	data            *PeerData
 	publisher       micro.Event
 	joined          bool
@@ -30,12 +31,13 @@ type Peer struct {
 	LeftAt          time.Time
 }
 
-func NewPeer(id, roomID uuid.UUID, publisher micro.Event) *Peer {
+func NewPeer(id, roomID uuid.UUID, roomName string, publisher micro.Event) *Peer {
 	peer := &Peer{
 		EventEmitter: eventemitter.NewEventEmitter(),
 		logger:       log.NewLogger(log.WithFields(map[string]interface{}{"caller": "internal.Room"})),
 		ID:           id,
 		RoomID:       roomID,
+		RoomName:     roomName,
 		closeCh:      make(chan int32),
 		data: &PeerData{
 			Transports:    make(map[string]mediasoup.ITransport),
@@ -58,6 +60,19 @@ func (p *Peer) Close() {
 	if atomic.CompareAndSwapInt32(&p.closed, 0, 1) {
 		p.logger.Log(log.InfoLevel, "peer closed")
 		close(p.closeCh)
+	}
+	for _, consumer := range p.GetConsumers() {
+		consumer.Close()
+	}
+	for _, producer := range p.GetProducers() {
+		producer.Close()
+	}
+	consumerTransport := p.GetConsumerTransport()
+	if consumerTransport != nil {
+		consumerTransport.Close()
+	}
+	for _, transports := range p.GetTransports() {
+		transports.Close()
 	}
 
 	p.SafeEmit("close")
@@ -198,7 +213,7 @@ func (p *Peer) GetPeerInfo() *Peer {
 }
 
 func (peer *Peer) Notify(method string, data interface{}) error {
-	notification := CreateNotification(method, data, peer.GetID(), peer.GetRoomID())
+	notification := CreateNotification(method, data, peer.GetID(), peer.RoomName)
 	return peer.publisher.Publish(context.TODO(), notification)
 }
 

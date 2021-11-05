@@ -156,7 +156,7 @@ func (r *Room) CreatePeer(peerId uuid.UUID) (peer *Peer, err error) {
 		return
 	}
 
-	peer = NewPeer(peerId, r.ID, r.core_publisher)
+	peer = NewPeer(peerId, r.ID, r.RoomName, r.core_publisher)
 
 	if r.peers == nil {
 		r.peers = make(map[uuid.UUID]*Peer)
@@ -199,15 +199,9 @@ func (r *Room) HandlePeer(peer *Peer, returning bool) {
 	// Returning user
 	if returning {
 		r.peerJoining(peer, true)
-	} else if DefaultConfig.MaxUserPerRoom <= len(r.peers) {
-		r.handleOverRoomLimit(peer)
 	} else {
 		r.peerJoining(peer, false)
 	}
-}
-
-func (r *Room) handleOverRoomLimit(peer *Peer) {
-	r.notification(peer, "overRoomLimit", nil, false, false)
 }
 
 func (r *Room) handleAudioLevelObserver() {
@@ -215,12 +209,12 @@ func (r *Room) handleAudioLevelObserver() {
 		producer := volumes[0].Producer
 		volume := volumes[0].Volume
 		// todo: fix this
-		r.notification(nil, "activeSpeaker", H{"peerId": producer.AppData().(H)["peerId"],
+		r.notification(nil, "notification/activeSpeaker", H{"peerId": producer.AppData().(H)["peerId"],
 			"volume": volume}, true, false)
 
 	})
 	r.AudioLevelObserver.On("silence", func() {
-		r.notification(nil, "activeSpeaker", H{"peerId": nil}, true, false)
+		r.notification(nil, "notification/activeSpeaker", H{"peerId": nil}, true, false)
 	})
 }
 
@@ -245,19 +239,12 @@ func (r *Room) CheckEmpty() bool {
 }
 
 func (r *Room) peerJoining(peer *Peer, returning bool) {
-
 	r.locker.Lock()
 	r.peers[peer.ID] = peer
 	r.locker.Unlock()
 
 	peer.router = r.GetLeastLoadedRouter(peer)
 	r.handlePeer(peer)
-	if returning {
-		r.notification(peer, "roomBack", nil, false, false)
-	} else {
-		r.notification(peer, "roomReady", DefaultConfig.TurnConfig, false, false)
-	}
-
 }
 
 func (r *Room) handlePeer(peer *Peer) {
@@ -282,7 +269,7 @@ func (r *Room) handlePeerClose(peer *Peer) {
 
 	// If the Peer was joined, notify all Peers.
 	if peer.joined {
-		r.notification(peer, "peerClosed",
+		r.notification(peer, "notification/peerClosed",
 			H{"peerId": peer.GetID()}, true, false)
 	}
 
@@ -466,7 +453,7 @@ func (r *Room) Produce(peer *Peer, opt ProduceOption) (string, error) {
 			"producerId": producer.Id(),
 			"score":      score,
 		}
-		peer.Notify("producerScore", db)
+		peer.Notify("notification/producerScore", db)
 	})
 	producer.On("videoorientationchange", func(videoOrientation mediasoup.ProducerVideoOrientation) {
 		r.logger.Log(log.DebugLevel, "producerId", producer.Id(), "videoOrientation", videoOrientation, "producer 'videoorientationchange' event")
@@ -506,6 +493,7 @@ func (r *Room) HandleProducer(peer *Peer, producerId string, action v1.Action) e
 	}
 	return nil
 }
+
 func (r *Room) HandleConsumer(peer *Peer, consumerId string, action v1.Action) ([]byte, error) {
 	// Ensure the Peer is joined.
 	if !peer.GetJoined() {
@@ -519,7 +507,7 @@ func (r *Room) HandleConsumer(peer *Peer, consumerId string, action v1.Action) (
 	switch action {
 	case v1.Action_CLOSE:
 		consumer.Close()
-		peer.RemoveProducer(consumer.Id())
+		peer.RemoveConsumer(consumer.Id())
 	case v1.Action_PAUSE:
 		err := consumer.Pause()
 		if err != nil {
@@ -621,24 +609,26 @@ func (r *Room) CreateConsumer(consumerPeer *Peer, producerID string, producerMed
 
 		consumerPeer.RemoveConsumer(consumer.Id())
 
-		consumerPeer.Notify("consumerClosed", H{
+		consumerPeer.Notify("notification/consumerClosed", H{
 			"consumerId": consumer.Id(),
 		})
 	})
 	consumer.On("producerpause", func() {
-		consumerPeer.Notify("consumerPaused", H{
+		consumerPeer.Notify("notification/consumerPaused", H{
 			"consumerId": consumer.Id(),
 		})
 	})
+
 	consumer.On("producerresume", func() {
 
-		consumerPeer.Notify("consumerResumed", H{
+		consumerPeer.Notify("notification/consumerResumed", H{
 			"consumerId": consumer.Id(),
 		})
 	})
+
 	consumer.On("score", func(score mediasoup.ConsumerScore) {
 
-		consumerPeer.Notify("consumerScore", H{
+		consumerPeer.Notify("notification/consumerScore", H{
 			"consumerId": consumer.Id(),
 			"score":      score,
 		})
@@ -650,7 +640,7 @@ func (r *Room) CreateConsumer(consumerPeer *Peer, producerID string, producerMed
 		notifyData["spatialLayer"] = layers.SpatialLayer
 		notifyData["temporalLayer"] = layers.TemporalLayer
 
-		consumerPeer.Notify("consumerLayersChanged", notifyData)
+		consumerPeer.Notify("notification/consumerLayersChanged", notifyData)
 	})
 
 	// NOTE: For testing.
