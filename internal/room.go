@@ -29,12 +29,11 @@ type Room struct {
 	logger             log.Logger
 	closed             int32
 	locked             bool
-	accessCode         int32
 	core_publisher     micro.Event
 	internal_publisher micro.Event
 }
 
-func NewRoom(mediasoupWorker []*mediasoup.Worker, roomID uuid.UUID, roomName string, accessCode int32, core_publisher, internal_publisher micro.Event) (*Room, error) {
+func NewRoom(mediasoupWorker []*mediasoup.Worker, roomID uuid.UUID, roomName string, core_publisher, internal_publisher micro.Event) (*Room, error) {
 
 	log.Infof("create() [RoomId: %s]", roomID)
 
@@ -83,7 +82,6 @@ func NewRoom(mediasoupWorker []*mediasoup.Worker, roomID uuid.UUID, roomName str
 		peers:              make(map[uuid.UUID]*Peer),
 		EventEmitter:       eventemitter.NewEventEmitter(),
 		lastN:              make([]uuid.UUID, 0),
-		accessCode:         accessCode,
 		core_publisher:     core_publisher,
 		internal_publisher: internal_publisher,
 	}
@@ -144,10 +142,6 @@ func (r *Room) Peers() (peers []*Peer) {
 	}
 
 	return
-}
-
-func (r *Room) ValidSecret(secret int32) bool {
-	return r.accessCode == secret
 }
 
 func (r *Room) CreatePeer(peerId uuid.UUID) (peer *Peer, err error) {
@@ -448,19 +442,11 @@ func (r *Room) Produce(peer *Peer, opt ProduceOption) (string, error) {
 	}
 	pipeRouters := r.getRoutersToPipeTo(peer.GetRouterID())
 
-	for routerId, destinationRouter := range r.Routers {
-		has := false
-		for _, rr := range pipeRouters {
-			if rr.Id() == routerId {
-				has = true
-			}
-		}
-		if has {
-			peer.router.PipeToRouter(mediasoup.PipeToRouterOptions{
-				ProducerId: producer.Id(),
-				Router:     destinationRouter,
-			})
-		}
+	for _, destinationRouter := range pipeRouters {
+		peer.router.PipeToRouter(mediasoup.PipeToRouterOptions{
+			ProducerId: producer.Id(),
+			Router:     destinationRouter,
+		})
 	}
 
 	// Store the Producer into the protoo Peer data Object.
@@ -485,19 +471,6 @@ func (r *Room) Produce(peer *Peer, opt ProduceOption) (string, error) {
 	producer.On("videoorientationchange", func(videoOrientation mediasoup.ProducerVideoOrientation) {
 		r.logger.Log(log.DebugLevel, "producerId", producer.Id(), "videoOrientation", videoOrientation, "producer 'videoorientationchange' event")
 	})
-
-	// NOTE: For testing.
-	// producer.EnableTraceEvent("rtp", "keyframe", "nack", "pli", "fir");
-	// producer.EnableTraceEvent("pli", "fir");
-	// producer.EnableTraceEvent("keyframe");
-
-	// producer.On("trace", func(trace mediasoup.ProducerTraceEventData) {
-	// 	r.logger.Debug().
-	// 		Str("producerId", producer.Id()).
-	// 		Str("trace.type", string(trace.Type)).
-	// 		Interface("trace", trace).
-	// 		Msg(`producer "trace" event`)
-	// })getConsumerStats
 
 	// TODO: should be handled by core
 	// // Optimization: Create a server-side Consumer for each Peer.
@@ -608,33 +581,11 @@ func (r *Room) GetStats(peer *Peer, id string, statsType v1.StatsType) ([]byte, 
 }
 
 // Creates a mediasoup Consumer for the given mediasoup Producer.
-func (r *Room) CreateConsumer(consumerPeer, producerPeer *Peer, producer *mediasoup.Producer) (*CreateConsumerResponse, error) {
-	r.logger.Logf(log.DebugLevel, "createConsumer() [consumerPeer:%s, producerPeer:%s, producer:%s]",
+func (r *Room) CreateConsumer(consumerPeer *Peer, producerID string, producerMediaKind mediasoup.MediaKind, appData interface{}) (*CreateConsumerResponse, error) {
+	r.logger.Logf(log.DebugLevel, "createConsumer() [consumerPeer: %s, producerID: %s]",
 		consumerPeer.GetID(),
-		producerPeer.GetID(),
-		producer.Id(),
+		producerID,
 	)
-
-	// Optimization:
-	// - Create the server-side Consumer in paused mode.
-	// - Tell its Peer about it and wait for its response.
-	// - Upon receipt of the response, resume the server-side Consumer.
-	// - If video, this will mean a single key frame requested by the
-	//   server-side Consumer (when resuming it).
-	// - If audio (or video), it will avoid that RTP packets are received by the
-	//   remote endpoint *before* the Consumer is locally created in the endpoint
-	//   (and before the local SDP O/A procedure ends). If that happens (RTP
-	//   packets are received before the SDP O/A is done) the PeerConnection may
-	//   fail to associate the RTP stream.
-
-	// consumerPeerData := consumerPeer.data
-
-	// NOTE: Don"t create the Consumer if the remote Peer cannot consume it.
-	// TODO: check this on core level
-	if consumerPeer.GetRtpCapabilities() == nil ||
-		!producerPeer.router.CanConsume(producer.Id(), *consumerPeer.GetRtpCapabilities()) {
-		return nil, ErrUnableToConsume
-	}
 
 	// Must take the Transport the remote Peer is using for consuming.
 	transport := consumerPeer.GetConsumerTransport()
@@ -645,10 +596,10 @@ func (r *Room) CreateConsumer(consumerPeer, producerPeer *Peer, producer *medias
 	}
 
 	consumer, err := transport.Consume(mediasoup.ConsumerOptions{
-		ProducerId:      producer.Id(),
+		ProducerId:      producerID,
 		RtpCapabilities: *consumerPeer.GetRtpCapabilities(),
-		Paused:          producer.Kind() == mediasoup.MediaKind_Video,
-		AppData:         producer.AppData(),
+		Paused:          producerMediaKind == mediasoup.MediaKind_Video,
+		AppData:         appData,
 	})
 
 	if err != nil {
@@ -656,7 +607,7 @@ func (r *Room) CreateConsumer(consumerPeer, producerPeer *Peer, producer *medias
 		return nil, err
 	}
 
-	if producer.Kind() == mediasoup.MediaKind_Audio {
+	if producerMediaKind == mediasoup.MediaKind_Audio {
 		consumer.SetPriority(255)
 	}
 
