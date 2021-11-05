@@ -15,6 +15,7 @@ service NodeService {
   rpc CreateWebRtcTransport (CreateWebRtcTransportRequest) returns (CreateWebRtcTransportResponse);
   rpc ConnectWebRtcTransport (ConnectWebRtcTransportRequest) returns (ConnectWebRtcTransportResponse);
   rpc RestartIce (RestartIceRequest) returns (RestartIceResponse);
+  rpc ProducerCanConsume (ProducerCanConsumeRequest) returns (ProducerCanConsumeResponse);
   rpc Produce (ProduceRequest) returns (ProduceResponse);
   // producer action will have pause/resume/close actions.
   rpc ProducerAction (ProducerActionRequest) returns (ProducerActionResponse);
@@ -64,11 +65,10 @@ message BasicInfo {
 message CreatePeerRequest {
   BasicInfo base_info = 1;
   string room_name = 2;
-  int32 secret = 3;
 }
 
 message CreatePeerResponse {
-
+  string router = 1;
 }
 
 message ClosePeerRequest {
@@ -128,6 +128,16 @@ message RestartIceResponse {
   bytes ice_parameters = 1;
 }
 
+message ProducerCanConsumeRequest {
+  BasicInfo base_info = 1;
+  string producer_id = 2;
+  bytes rtp_capabilities = 3;
+}
+
+message ProducerCanConsumeResponse {
+  bool can_consume = 1;
+}
+
 message ProduceRequest {
   BasicInfo base_info = 1;
   string transport_id = 2;
@@ -152,6 +162,8 @@ message ConsumeRequest {
   BasicInfo base_info = 1;
   string dest_peerid = 2;
   string producer_id = 3;
+  string producer_kind = 4;
+  bytes producer_app_data = 5;
 }
 
 message ConsumeResponse {
@@ -169,7 +181,7 @@ message ConsumerActionRequest {
   Action action = 3;
 }
 message ConsumerActionResponse {
-  bytes data = 1;
+  bytes score = 1;
 }
 
 message GetStatsRequest {

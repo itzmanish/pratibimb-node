@@ -45,6 +45,7 @@ type NodeService interface {
 	CreateWebRtcTransport(ctx context.Context, in *CreateWebRtcTransportRequest, opts ...client.CallOption) (*CreateWebRtcTransportResponse, error)
 	ConnectWebRtcTransport(ctx context.Context, in *ConnectWebRtcTransportRequest, opts ...client.CallOption) (*ConnectWebRtcTransportResponse, error)
 	RestartIce(ctx context.Context, in *RestartIceRequest, opts ...client.CallOption) (*RestartIceResponse, error)
+	ProducerCanConsume(ctx context.Context, in *ProducerCanConsumeRequest, opts ...client.CallOption) (*ProducerCanConsumeResponse, error)
 	Produce(ctx context.Context, in *ProduceRequest, opts ...client.CallOption) (*ProduceResponse, error)
 	// producer action will have pause/resume/close actions.
 	ProducerAction(ctx context.Context, in *ProducerActionRequest, opts ...client.CallOption) (*ProducerActionResponse, error)
@@ -147,6 +148,16 @@ func (c *nodeService) RestartIce(ctx context.Context, in *RestartIceRequest, opt
 	return out, nil
 }
 
+func (c *nodeService) ProducerCanConsume(ctx context.Context, in *ProducerCanConsumeRequest, opts ...client.CallOption) (*ProducerCanConsumeResponse, error) {
+	req := c.c.NewRequest(c.name, "NodeService.ProducerCanConsume", in)
+	out := new(ProducerCanConsumeResponse)
+	err := c.c.Call(ctx, req, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *nodeService) Produce(ctx context.Context, in *ProduceRequest, opts ...client.CallOption) (*ProduceResponse, error) {
 	req := c.c.NewRequest(c.name, "NodeService.Produce", in)
 	out := new(ProduceResponse)
@@ -209,6 +220,7 @@ type NodeServiceHandler interface {
 	CreateWebRtcTransport(context.Context, *CreateWebRtcTransportRequest, *CreateWebRtcTransportResponse) error
 	ConnectWebRtcTransport(context.Context, *ConnectWebRtcTransportRequest, *ConnectWebRtcTransportResponse) error
 	RestartIce(context.Context, *RestartIceRequest, *RestartIceResponse) error
+	ProducerCanConsume(context.Context, *ProducerCanConsumeRequest, *ProducerCanConsumeResponse) error
 	Produce(context.Context, *ProduceRequest, *ProduceResponse) error
 	// producer action will have pause/resume/close actions.
 	ProducerAction(context.Context, *ProducerActionRequest, *ProducerActionResponse) error
@@ -229,6 +241,7 @@ func RegisterNodeServiceHandler(s server.Server, hdlr NodeServiceHandler, opts .
 		CreateWebRtcTransport(ctx context.Context, in *CreateWebRtcTransportRequest, out *CreateWebRtcTransportResponse) error
 		ConnectWebRtcTransport(ctx context.Context, in *ConnectWebRtcTransportRequest, out *ConnectWebRtcTransportResponse) error
 		RestartIce(ctx context.Context, in *RestartIceRequest, out *RestartIceResponse) error
+		ProducerCanConsume(ctx context.Context, in *ProducerCanConsumeRequest, out *ProducerCanConsumeResponse) error
 		Produce(ctx context.Context, in *ProduceRequest, out *ProduceResponse) error
 		ProducerAction(ctx context.Context, in *ProducerActionRequest, out *ProducerActionResponse) error
 		Consume(ctx context.Context, in *ConsumeRequest, out *ConsumeResponse) error
@@ -276,6 +289,10 @@ func (h *nodeServiceHandler) ConnectWebRtcTransport(ctx context.Context, in *Con
 
 func (h *nodeServiceHandler) RestartIce(ctx context.Context, in *RestartIceRequest, out *RestartIceResponse) error {
 	return h.NodeServiceHandler.RestartIce(ctx, in, out)
+}
+
+func (h *nodeServiceHandler) ProducerCanConsume(ctx context.Context, in *ProducerCanConsumeRequest, out *ProducerCanConsumeResponse) error {
+	return h.NodeServiceHandler.ProducerCanConsume(ctx, in, out)
 }
 
 func (h *nodeServiceHandler) Produce(ctx context.Context, in *ProduceRequest, out *ProduceResponse) error {
