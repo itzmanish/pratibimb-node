@@ -10,15 +10,13 @@ replace (
 )
 
 require (
-	github.com/golang/protobuf v1.5.2
-	github.com/gorilla/websocket v1.4.2
+	github.com/golang/protobuf v1.5.2 // indirect
+	github.com/gorilla/websocket v1.4.2 // indirect
 	github.com/hashicorp/consul/api v1.11.0
 	github.com/itzmanish/go-micro-plugins/registry/consul/v2 v2.10.0
-	github.com/itzmanish/go-micro-plugins/store/redis/v2 v2.10.0
 	github.com/itzmanish/go-micro/v2 v2.10.1
 	github.com/jiyeyuran/go-eventemitter v1.4.0
 	github.com/jiyeyuran/mediasoup-go v1.8.1
-	github.com/jkawamoto/structpbconv v0.0.0-20191225002205-7d1a3174c262
 	github.com/joho/godotenv v1.4.0
 	github.com/satori/go.uuid v1.2.0
 	github.com/twilio/twilio-go v0.15.0
