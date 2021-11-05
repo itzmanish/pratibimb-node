@@ -201,3 +201,7 @@ func (peer *Peer) Notify(method string, data interface{}) error {
 	notification := CreateNotification(method, data, peer.GetID(), peer.GetRoomID())
 	return peer.publisher.Publish(context.TODO(), notification)
 }
+
+func (peer *Peer) CanConsume(producerID string, rtpCaps mediasoup.RtpCapabilities) bool {
+	return peer.router.CanConsume(producerID, rtpCaps)
+}

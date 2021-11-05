@@ -74,6 +74,7 @@ func (service *NodeHandler) Health(ctx context.Context, in *v1.HealthRequest, ou
 }
 
 func (h *NodeHandler) CreatePeer(ctx context.Context, in *v1.CreatePeerRequest, out *v1.CreatePeerResponse) error {
+	log.Debug("CreatePeer req: ", in)
 	ruuid, err := uuid.FromString(in.BaseInfo.RoomId)
 	if err != nil {
 		return err
@@ -82,7 +83,7 @@ func (h *NodeHandler) CreatePeer(ctx context.Context, in *v1.CreatePeerRequest, 
 	if err != nil {
 		return err
 	}
-	room, err := getOrCreateRoom(ruuid, in.RoomName, in.Secret, h.coreEvent, h.internalEvent)
+	room, err := getOrCreateRoom(ruuid, in.RoomName, h.coreEvent, h.internalEvent)
 	if err != nil {
 		return err
 	}
@@ -96,15 +97,17 @@ func (h *NodeHandler) CreatePeer(ctx context.Context, in *v1.CreatePeerRequest, 
 			returning = true
 		}
 	}
-	_, err = room.CreatePeer(puuid)
+	peer, err = room.CreatePeer(puuid)
 	if err != nil {
 		return err
 	}
 	room.HandlePeer(peer, returning)
+	out.Router = peer.GetRouterID()
 	return nil
 }
 
 func (h *NodeHandler) ClosePeer(ctx context.Context, in *v1.ClosePeerRequest, out *v1.ClosePeerResponse) error {
+	log.Debug("ClosePeer req: ", in)
 	_, peer, err := GetPeerAndRoom(in.BaseInfo.PeerId, in.BaseInfo.RoomId)
 	if err != nil {
 		return err
@@ -115,6 +118,7 @@ func (h *NodeHandler) ClosePeer(ctx context.Context, in *v1.ClosePeerRequest, ou
 }
 
 func (h *NodeHandler) GetRouterCapabilities(ctx context.Context, in *v1.GetRouterCapabilitiesRequest, out *v1.GetRouterCapabilitiesResponse) error {
+	log.Debug("GetRouterCapabilities req: ", in)
 	room, peer, err := GetPeerAndRoom(in.BaseInfo.PeerId, in.BaseInfo.RoomId)
 	if err != nil {
 		return err
@@ -126,6 +130,7 @@ func (h *NodeHandler) GetRouterCapabilities(ctx context.Context, in *v1.GetRoute
 }
 
 func (h *NodeHandler) Join(ctx context.Context, in *v1.JoinPeerRequest, out *v1.JoinPeerResponse) error {
+	log.Debug("Join req: ", in)
 	room, peer, err := GetPeerAndRoom(in.BaseInfo.PeerId, in.BaseInfo.RoomId)
 	if err != nil {
 		return err
@@ -140,6 +145,7 @@ func (h *NodeHandler) Join(ctx context.Context, in *v1.JoinPeerRequest, out *v1.
 }
 
 func (h *NodeHandler) CreateWebRtcTransport(ctx context.Context, in *v1.CreateWebRtcTransportRequest, out *v1.CreateWebRtcTransportResponse) error {
+	log.Debug("CreateWebRTCTransport req: ", in)
 	room, peer, err := GetPeerAndRoom(in.BaseInfo.PeerId, in.BaseInfo.RoomId)
 	if err != nil {
 		return err
@@ -169,6 +175,7 @@ func (h *NodeHandler) CreateWebRtcTransport(ctx context.Context, in *v1.CreateWe
 }
 
 func (h *NodeHandler) ConnectWebRtcTransport(ctx context.Context, in *v1.ConnectWebRtcTransportRequest, out *v1.ConnectWebRtcTransportResponse) error {
+	log.Debug("ConnectWebRTCTransport req: ", in)
 	room, peer, err := GetPeerAndRoom(in.BaseInfo.PeerId, in.BaseInfo.RoomId)
 	if err != nil {
 		return err
@@ -185,6 +192,7 @@ func (h *NodeHandler) ConnectWebRtcTransport(ctx context.Context, in *v1.Connect
 }
 
 func (h *NodeHandler) RestartIce(ctx context.Context, in *v1.RestartIceRequest, out *v1.RestartIceResponse) error {
+	log.Debug("RestartIce req: ", in)
 	room, peer, err := GetPeerAndRoom(in.BaseInfo.PeerId, in.BaseInfo.RoomId)
 	if err != nil {
 		return err
@@ -199,7 +207,23 @@ func (h *NodeHandler) RestartIce(ctx context.Context, in *v1.RestartIceRequest, 
 	return nil
 }
 
+func (h *NodeHandler) ProducerCanConsume(ctx context.Context, in *v1.ProducerCanConsumeRequest, out *v1.ProducerCanConsumeResponse) error {
+	log.Debug("ProducerCanConsume req: ", in)
+	_, peer, err := GetPeerAndRoom(in.BaseInfo.PeerId, in.BaseInfo.RoomId)
+	if err != nil {
+		return err
+	}
+	var rtpCaps mediasoup.RtpCapabilities
+	err = json.Unmarshal(in.RtpCapabilities, &rtpCaps)
+	if err != nil {
+		return err
+	}
+	out.CanConsume = peer.CanConsume(in.ProducerId, rtpCaps)
+	return nil
+}
+
 func (h *NodeHandler) Produce(ctx context.Context, in *v1.ProduceRequest, out *v1.ProduceResponse) error {
+	log.Debug("Produce req: ", in)
 	room, peer, err := GetPeerAndRoom(in.BaseInfo.PeerId, in.BaseInfo.RoomId)
 	if err != nil {
 		return err
@@ -227,6 +251,7 @@ func (h *NodeHandler) Produce(ctx context.Context, in *v1.ProduceRequest, out *v
 }
 
 func (h *NodeHandler) ProducerAction(ctx context.Context, in *v1.ProducerActionRequest, out *v1.ProducerActionResponse) error {
+	log.Debug("ProducerAction req: ", in)
 	room, peer, err := GetPeerAndRoom(in.BaseInfo.PeerId, in.BaseInfo.RoomId)
 	if err != nil {
 		return err
@@ -235,6 +260,7 @@ func (h *NodeHandler) ProducerAction(ctx context.Context, in *v1.ProducerActionR
 }
 
 func (h *NodeHandler) Consume(ctx context.Context, in *v1.ConsumeRequest, out *v1.ConsumeResponse) error {
+	log.Debug("Consume req: ", in)
 	room, peer, err := GetPeerAndRoom(in.BaseInfo.PeerId, in.BaseInfo.RoomId)
 	if err != nil {
 		return err
@@ -247,11 +273,12 @@ func (h *NodeHandler) Consume(ctx context.Context, in *v1.ConsumeRequest, out *v
 	if producerPeer == nil {
 		return internal.ErrPeerNotFound(in.DestPeerid)
 	}
-	producer, ok := producerPeer.GetProducer(in.ProducerId)
-	if !ok {
-		return internal.ErrProducerNotFound(in.ProducerId)
+	var producerAppData internal.H
+	err = json.Unmarshal(in.ProducerAppData, &producerAppData)
+	if err != nil {
+		return err
 	}
-	res, err := room.CreateConsumer(peer, producerPeer, producer)
+	res, err := room.CreateConsumer(peer, in.ProducerId, mediasoup.MediaKind(in.ProducerKind), producerAppData)
 	if err != nil {
 		return err
 	}
@@ -266,11 +293,12 @@ func (h *NodeHandler) Consume(ctx context.Context, in *v1.ConsumeRequest, out *v
 }
 
 func (h *NodeHandler) ConsumerAction(ctx context.Context, in *v1.ConsumerActionRequest, out *v1.ConsumerActionResponse) error {
+	log.Debug("ConsumerAction req: ", in)
 	room, peer, err := GetPeerAndRoom(in.BaseInfo.PeerId, in.BaseInfo.RoomId)
 	if err != nil {
 		return err
 	}
-	out.Data, err = room.HandleConsumer(peer, in.ConsumerId, in.Action)
+	out.Score, err = room.HandleConsumer(peer, in.ConsumerId, in.Action)
 	if err != nil {
 		return err
 	}
@@ -278,6 +306,7 @@ func (h *NodeHandler) ConsumerAction(ctx context.Context, in *v1.ConsumerActionR
 }
 
 func (h *NodeHandler) GetStats(ctx context.Context, in *v1.GetStatsRequest, out *v1.GetStatsResponse) error {
+	log.Debug("GetStats req: ", in)
 	room, peer, err := GetPeerAndRoom(in.BaseInfo.PeerId, in.BaseInfo.RoomId)
 	if err != nil {
 		return err
@@ -297,16 +326,13 @@ func getRoom(id uuid.UUID) (*internal.Room, error) {
 	return value.(*internal.Room), nil
 }
 
-func getOrCreateRoom(id uuid.UUID, name string, secret int32, core_publisher, internal_publisher micro.Event) (*internal.Room, error) {
+func getOrCreateRoom(id uuid.UUID, name string, core_publisher, internal_publisher micro.Event) (*internal.Room, error) {
 	room, err := getRoom(id)
 	if err == nil {
-		if !room.ValidSecret(secret) {
-			return nil, internal.ErrInvalidSecret
-		}
 		return room, nil
 	}
 
-	room, err = internal.NewRoom(mediasoupWorker, id, name, secret, core_publisher, internal_publisher)
+	room, err = internal.NewRoom(mediasoupWorker, id, name, core_publisher, internal_publisher)
 	if err != nil {
 		return nil, err
 	}
