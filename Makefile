@@ -2,6 +2,11 @@
 GOPATH:=$(shell go env GOPATH)
 MODIFY=Mproto/imports/api.proto=github.com/itzmanish/go-micro/v2/api/proto
 
+.PHONY: proto
+proto:
+
+	cd proto && buf generate
+
 .PHONY: build
 build:
 
