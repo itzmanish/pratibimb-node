@@ -156,11 +156,6 @@ func (sa StrArray) Has(value string) bool {
 	return false
 }
 
-type PipeTransportPair struct {
-	localPipeTransport    *mediasoup.PipeTransport
-	remotePipeTransportID string
-}
-
 type ProducePipeTransportPayload struct {
 	ProducerID     string `json:"producer_id"`
 	Kind           mediasoup.MediaKind
