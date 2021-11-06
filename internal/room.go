@@ -28,15 +28,14 @@ type Room struct {
 	Routers map[string]*mediasoup.Router
 	// mapPipeTransportQueue is a map of transport id to pipeTransport for unconnected pipeTransport
 	mapPipeTransportQueue map[string]*mediasoup.PipeTransport
-	// mapPipeTransports is a map of transport id to pipeTransport for connected pipeTransport
-	mapPipeTransports map[string]*mediasoup.PipeTransport
-	// mapPipeProducers is a map of pipeProducer id to Producer
-	mapPipeProducers map[string]*mediasoup.Producer
-	// mapPipeConsumers is a map of pipeConsumer id to Consumer
-	mapPipeConsumers map[string]*mediasoup.Consumer
+	// mapPipeTransports is a map of transport id to pipeTransport for connected pipeTransport (map[string]*mediasoup.PipeTransport)
+	mapPipeTransports sync.Map
+	// mapPipeProducers is a map of pipeProducer id to Producer (map[string]*mediasoup.Producer)
+	mapPipeProducers sync.Map
+	// mapPipeConsumers is a map of pipeConsumer id to Consumer (map[string]*mediasoup.Consumer)
+	mapPipeConsumers sync.Map
 	// peers is a map of peer uuid to Peer
 	peers              map[uuid.UUID]*Peer
-	lastN              []uuid.UUID
 	logger             log.Logger
 	closed             int32
 	locked             bool
@@ -61,19 +60,15 @@ func NewRoom(mediasoupWorker []*mediasoup.Worker, roomID uuid.UUID, roomName str
 	log.Debugf("Routers available: %v, Count: %d", routers, len(routers))
 
 	room := &Room{
+		EventEmitter:          eventemitter.NewEventEmitter(),
 		ID:                    roomID,
 		RoomName:              roomName,
 		Routers:               routers,
 		logger:                log.NewLogger(log.WithFields(map[string]interface{}{"caller": "Room"})),
 		peers:                 make(map[uuid.UUID]*Peer),
-		EventEmitter:          eventemitter.NewEventEmitter(),
-		lastN:                 make([]uuid.UUID, 0),
 		core_publisher:        core_publisher,
 		internal_publisher:    internal_publisher,
 		mapPipeTransportQueue: make(map[string]*mediasoup.PipeTransport),
-		mapPipeTransports:     make(map[string]*mediasoup.PipeTransport),
-		mapPipeProducers:      make(map[string]*mediasoup.Producer),
-		mapPipeConsumers:      make(map[string]*mediasoup.Consumer),
 	}
 
 	return room, nil
@@ -88,32 +83,41 @@ func (r *Room) IsLocked() bool {
 }
 
 func (r *Room) Close() {
-	r.locker.Lock()
-	defer r.locker.Unlock()
-
 	if r.Closed() {
 		return
 	}
-	for _, peer := range r.peers {
+	for _, peer := range r.Peers() {
 		peer.Close()
 	}
-
+	r.locker.Lock()
 	r.peers = make(map[uuid.UUID]*Peer)
-
-	if atomic.CompareAndSwapInt32(&r.closed, 0, 1) {
-		r.logger.Log(log.InfoLevel, "room closed")
-	}
+	r.locker.Unlock()
+	r.locker.RLock()
 	for _, router := range r.Routers {
 		router.Close()
 	}
-	for _, pipeProducer := range r.mapPipeProducers {
-		pipeProducer.Close()
-	}
-	for _, pipeConsumer := range r.mapPipeConsumers {
-		pipeConsumer.Close()
-	}
-	for _, pipeTransport := range r.mapPipeTransports {
-		pipeTransport.Close()
+	r.locker.RUnlock()
+
+	r.mapPipeProducers.Range(func(key, value interface{}) bool {
+		producer := value.(*mediasoup.Producer)
+		producer.Close()
+		return true
+	})
+
+	r.mapPipeConsumers.Range(func(key, value interface{}) bool {
+		consumer := value.(*mediasoup.Consumer)
+		consumer.Close()
+		return true
+	})
+
+	r.mapPipeTransports.Range(func(key, value interface{}) bool {
+		transport := value.(*mediasoup.PipeTransport)
+		transport.Close()
+		return true
+	})
+
+	if atomic.CompareAndSwapInt32(&r.closed, 0, 1) {
+		r.logger.Log(log.InfoLevel, "room closed")
 	}
 	r.SafeEmit("close")
 }
@@ -123,8 +127,8 @@ func (r *Room) Closed() bool {
 }
 
 func (r *Room) Peers() (peers []*Peer) {
-	r.locker.Lock()
-	defer r.locker.Unlock()
+	r.locker.RLock()
+	defer r.locker.RUnlock()
 
 	for _, peer := range r.peers {
 		peers = append(peers, peer)
@@ -134,12 +138,10 @@ func (r *Room) Peers() (peers []*Peer) {
 }
 
 func (r *Room) CreatePeer(peerId uuid.UUID) (peer *Peer, err error) {
-	r.locker.Lock()
-	defer r.locker.Unlock()
 
 	r.logger.Log(log.InfoLevel, "createPeer()", "peerId", peerId)
-
-	if _, ok := r.peers[peerId]; ok {
+	peer = r.GetPeer(peerId)
+	if peer != nil {
 		err = errors.Conflict("PEER_EXISTS", `there is already a Peer with same peerId [peerId:"%s"]`, peerId)
 		delete(r.peers, peerId)
 		return
@@ -150,7 +152,6 @@ func (r *Room) CreatePeer(peerId uuid.UUID) (peer *Peer, err error) {
 	if r.peers == nil {
 		r.peers = make(map[uuid.UUID]*Peer)
 	}
-	r.peers[peerId] = peer
 
 	peer.On("close", func() {
 		r.locker.Lock()
@@ -159,6 +160,9 @@ func (r *Room) CreatePeer(peerId uuid.UUID) (peer *Peer, err error) {
 		peer.RemoveAllListeners()
 	})
 
+	r.locker.Lock()
+	r.peers[peerId] = peer
+	r.locker.Unlock()
 	return
 }
 
@@ -229,9 +233,6 @@ func (r *Room) CheckEmpty() bool {
 }
 
 func (r *Room) peerJoining(peer *Peer, returning bool) {
-	r.locker.Lock()
-	r.peers[peer.ID] = peer
-	r.locker.Unlock()
 
 	peer.router = r.GetLeastLoadedRouter(peer)
 	if r.AudioLevelObserver == nil {
@@ -297,7 +298,6 @@ func (r *Room) handlePeerClose(peer *Peer) {
 	if len(r.Peers()) == 0 {
 		r.Close()
 	}
-
 }
 
 func (r *Room) GetRouterRtpCapabilities(peer *Peer) mediasoup.RtpCapabilities {
@@ -307,6 +307,25 @@ func (r *Room) GetRouterRtpCapabilities(peer *Peer) mediasoup.RtpCapabilities {
 func (r *Room) SetRtpCapabilities(peer *Peer, rtpCapabilities *mediasoup.RtpCapabilities) {
 	peer.SetJoined(true)
 	peer.SetRtpCapabilities(rtpCapabilities)
+}
+
+func (r *Room) PipeActiveProducersToLocalRouter(peer *Peer) {
+	for _, joinedPeer := range r.getJoinedPeers(peer) {
+		for _, producer := range joinedPeer.GetProducers() {
+			var has bool
+			for _, rprod := range peer.router.Producers() {
+				if rprod.Id() == producer.Id() {
+					has = true
+				}
+			}
+			if !has {
+				joinedPeer.router.PipeToRouter(mediasoup.PipeToRouterOptions{
+					ProducerId: producer.Id(),
+					Router:     peer.router,
+				})
+			}
+		}
+	}
 }
 
 func (r *Room) CreateWebRtcTransport(peer *Peer, opt CreateWebRtcTransportOption) (*CreateWebrtcTransportResponse, error) {
@@ -483,20 +502,35 @@ func (r *Room) HandleProducer(peer *Peer, producerId string, action v1.Action) e
 	case v1.Action_CLOSE:
 		producer.Close()
 		peer.RemoveProducer(producer.Id())
+
 	case v1.Action_PAUSE:
 		return producer.Pause()
+
 	case v1.Action_RESUME:
 		return producer.Resume()
+
 	default:
 		return ErrActionNotDefined
 	}
 	return nil
 }
 
-func (r *Room) HandleConsumer(peer *Peer, consumerId string, action v1.Action) ([]byte, error) {
+func (r *Room) HandleConsumer(peer *Peer, consumerId, producerId string, action v1.Action) ([]byte, error) {
 	// Ensure the Peer is joined.
 	if !peer.GetJoined() {
 		return nil, ErrPeerNotJoined
+	}
+	if len(consumerId) == 0 {
+		peer.data.RLock()
+		for _, consumer := range peer.GetConsumers() {
+			if consumer.ProducerId() == producerId {
+				consumerId = consumer.Id()
+			}
+		}
+		peer.data.RUnlock()
+		if consumerId == "" {
+			return nil, ErrConsumerNotFoundForProducer(producerId)
+		}
 	}
 	consumer, ok := peer.GetConsumer(consumerId)
 	if !ok {
@@ -507,6 +541,9 @@ func (r *Room) HandleConsumer(peer *Peer, consumerId string, action v1.Action) (
 	case v1.Action_CLOSE:
 		consumer.Close()
 		peer.RemoveConsumer(consumer.Id())
+		peer.Notify("notification/consumerClosed", H{
+			"consumerId": consumer.Id(),
+		})
 	case v1.Action_PAUSE:
 		err := consumer.Pause()
 		if err != nil {
@@ -525,22 +562,22 @@ func (r *Room) HandleConsumer(peer *Peer, consumerId string, action v1.Action) (
 }
 
 func (r *Room) HandlePipeProducer(producerId string, action v1.Action) error {
-	r.locker.RLock()
-	pipeProducer, ok := r.mapPipeProducers[producerId]
-	r.locker.RUnlock()
+	value, ok := r.mapPipeProducers.Load(producerId)
 	if !ok {
 		return ErrPipeProducerNotFound(producerId)
 	}
+	pipeProducer := value.(*mediasoup.Producer)
 	switch action {
 	case v1.Action_CLOSE:
 		pipeProducer.Close()
-		r.locker.Lock()
-		delete(r.mapPipeProducers, producerId)
-		r.locker.Unlock()
+		r.mapPipeProducers.Delete(producerId)
+
 	case v1.Action_PAUSE:
 		return pipeProducer.Pause()
+
 	case v1.Action_RESUME:
 		return pipeProducer.Resume()
+
 	default:
 		return ErrActionNotDefined
 	}
@@ -548,16 +585,16 @@ func (r *Room) HandlePipeProducer(producerId string, action v1.Action) error {
 }
 
 func (r *Room) ClosePipeConsumer(consumerId string) error {
-	r.locker.RLock()
-	pipeConsumer, ok := r.mapPipeConsumers[consumerId]
-	r.locker.RUnlock()
+	value, ok := r.mapPipeConsumers.Load(consumerId)
 	if !ok {
 		return ErrPipeConsumerNotFound(consumerId)
 	}
-	pipeConsumer.Close()
-	r.locker.Lock()
-	delete(r.mapPipeConsumers, consumerId)
-	r.locker.Unlock()
+	pipeConsumer := value.(*mediasoup.Consumer)
+	err := pipeConsumer.Close()
+	if err != nil {
+		r.logger.Logf(log.WarnLevel, "pipeConsumer close failed. | Err: %v", err)
+	}
+	r.mapPipeConsumers.Delete(consumerId)
 	return nil
 }
 
@@ -639,10 +676,11 @@ func (r *Room) CreateConsumer(consumerPeer *Peer, producerID string, producerMed
 
 	// Set Consumer events.
 	consumer.On("transportclose", func() {
+		consumer.Close()
 		consumerPeer.RemoveConsumer(consumer.Id())
 	})
 	consumer.On("producerclose", func() {
-
+		consumer.Close()
 		consumerPeer.RemoveConsumer(consumer.Id())
 
 		consumerPeer.Notify("notification/consumerClosed", H{
@@ -656,14 +694,12 @@ func (r *Room) CreateConsumer(consumerPeer *Peer, producerID string, producerMed
 	})
 
 	consumer.On("producerresume", func() {
-
 		consumerPeer.Notify("notification/consumerResumed", H{
 			"consumerId": consumer.Id(),
 		})
 	})
 
 	consumer.On("score", func(score mediasoup.ConsumerScore) {
-
 		consumerPeer.Notify("notification/consumerScore", H{
 			"consumerId": consumer.Id(),
 			"score":      score,
@@ -819,8 +855,8 @@ func (r *Room) ConnectPipeTransport(peer *Peer, opts ConnectPipeTransportOptions
 			r.logger.Log(log.ErrorLevel, err)
 		}
 	})
+	r.mapPipeTransports.Store(transport.Id(), transport)
 	r.locker.Lock()
-	r.mapPipeTransports[transport.Id()] = transport
 	delete(r.mapPipeTransportQueue, opts.TransportID)
 	r.locker.Unlock()
 	return nil
@@ -840,12 +876,11 @@ func (r *Room) ConsumePipeTransport(peer *Peer, producerId, transportId string) 
 		}
 	}()
 
-	r.locker.RLock()
-	transport, ok := r.mapPipeTransports[transportId]
-	r.locker.RUnlock()
+	value, ok := r.mapPipeTransports.Load(transportId)
 	if !ok {
 		return
 	}
+	transport := value.(*mediasoup.PipeTransport)
 	pipeConsumer, err = transport.Consume(mediasoup.ConsumerOptions{
 		ProducerId: producerId,
 	})
@@ -876,9 +911,8 @@ func (r *Room) ConsumePipeTransport(peer *Peer, producerId, transportId string) 
 
 	})
 
-	r.locker.Lock()
-	r.mapPipeConsumers[pipeConsumer.Id()] = pipeConsumer
-	r.locker.Unlock()
+	r.mapPipeConsumers.Store(pipeConsumer.Id(), pipeConsumer)
+
 	result = ProducePipeTransportPayload{
 		ProducerID:     producerId,
 		Kind:           pipeConsumer.Kind(),
@@ -892,12 +926,11 @@ func (r *Room) ConsumePipeTransport(peer *Peer, producerId, transportId string) 
 }
 
 func (r *Room) ProducePipeTransport(peer *Peer, opts ProducePipeTransportPayload) error {
-	r.locker.RLock()
-	transport, ok := r.mapPipeTransports[opts.TransportID]
-	r.locker.RUnlock()
+	value, ok := r.mapPipeTransports.Load(opts.TransportID)
 	if !ok {
 		return ErrPipeTransportNotFound(opts.TransportID)
 	}
+	transport := value.(*mediasoup.PipeTransport)
 	pipeProducer, err := transport.Produce(mediasoup.ProducerOptions{
 		Id:            opts.ProducerID,
 		Kind:          opts.Kind,
@@ -911,23 +944,20 @@ func (r *Room) ProducePipeTransport(peer *Peer, opts ProducePipeTransportPayload
 	}
 	pipeProducer.Observer().On("close", func() {
 		r.internal_publisher.Publish(context.TODO(), CreateNotification("pipeConsumer.close", H{"pipeConsumerId": opts.PipeConsumerID}, peer.GetID(), r.GetID()))
-		r.locker.Lock()
-		delete(r.mapPipeProducers, pipeProducer.Id())
-		r.locker.Unlock()
+		r.mapPipeProducers.Delete(pipeProducer.Id())
 	})
-	r.locker.Lock()
-	r.mapPipeProducers[pipeProducer.Id()] = pipeProducer
-	r.locker.Unlock()
+
+	r.mapPipeProducers.Store(pipeProducer.Id(), pipeProducer)
+
 	return nil
 }
 
 func (r *Room) ClosePipeTransport(transportId string) error {
-	r.locker.RLock()
-	pipeTransport, ok := r.mapPipeTransports[transportId]
-	r.locker.RUnlock()
+	value, ok := r.mapPipeTransports.Load(transportId)
 	if !ok {
 		return ErrPipeTransportNotFound(transportId)
 	}
+	pipeTransport := value.(*mediasoup.PipeTransport)
 	pipeTransport.Close()
 	return nil
 }

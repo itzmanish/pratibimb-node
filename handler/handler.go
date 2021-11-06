@@ -141,6 +141,7 @@ func (h *NodeHandler) Join(ctx context.Context, in *v1.JoinPeerRequest, out *v1.
 		return err
 	}
 	room.SetRtpCapabilities(peer, &rtpCapabilities)
+	room.PipeActiveProducersToLocalRouter(peer)
 	return nil
 }
 
@@ -298,7 +299,12 @@ func (h *NodeHandler) ConsumerAction(ctx context.Context, in *v1.ConsumerActionR
 	if err != nil {
 		return err
 	}
-	out.Score, err = room.HandleConsumer(peer, in.ConsumerId, in.Action)
+
+	if len(in.GetConsumerId()) == 0 && len(in.GetProducerId()) == 0 {
+		return internal.ErrConsumerOrProducerIDRequired
+	}
+
+	out.Score, err = room.HandleConsumer(peer, in.ConsumerId, in.ProducerId, in.Action)
 	if err != nil {
 		return err
 	}

@@ -33,9 +33,13 @@ var (
 	ErrConsumerNotFound = func(id string) error {
 		return errors.NotFound("CONSUMER_NOT_FOUND", fmt.Sprintf(`Consumer with id "%s" not found`, id))
 	}
-	ErrConsumingTransportNotFound = errors.NotFound("TRANSPORT_NOT_FOUND", "Consumer transport not found")
-	ErrNoRouterExists             = errors.InternalServerError("ROUTER_DOES_NOT_EXIST", "no router available")
-	ErrActionNotDefined           = errors.BadRequest("ACTION_NOT_DEFINED", "Action not defined")
-	ErrStatsTypeNotDefined        = errors.BadRequest("STATS_TYPE_NOT_DEFINED", "Stats type not defined")
-	ErrUnableToConsume            = errors.InternalServerError("CANT_CONSUME", "can't consume the given producer")
+	ErrConsumingTransportNotFound   = errors.NotFound("TRANSPORT_NOT_FOUND", "Consumer transport not found")
+	ErrNoRouterExists               = errors.InternalServerError("ROUTER_DOES_NOT_EXIST", "no router available")
+	ErrActionNotDefined             = errors.BadRequest("ACTION_NOT_DEFINED", "Action not defined")
+	ErrStatsTypeNotDefined          = errors.BadRequest("STATS_TYPE_NOT_DEFINED", "Stats type not defined")
+	ErrUnableToConsume              = errors.InternalServerError("CANT_CONSUME", "can't consume the given producer")
+	ErrConsumerOrProducerIDRequired = errors.BadRequest("VALIDATION_ERROR", "one of consumer or producer id is required")
+	ErrConsumerNotFoundForProducer  = func(pid string) error {
+		return errors.NotFound("CONSUMER_NOT_FOUND", fmt.Sprintf("consumer not found for producer(%s)", pid))
+	}
 )
