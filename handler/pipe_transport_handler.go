@@ -120,3 +120,21 @@ func (h *NodeHandler) ConsumePipeTransport(ctx context.Context, in *v1.ConsumePi
 	out.TransportId = res.TransportID
 	return nil
 }
+
+func (h *NodeHandler) PipeProducerAction(ctx context.Context, in *v1.PipeProducerActionRequest, out *v1.PipeProducerActionResponse) error {
+	log.Debug("PipeProducerAction() | req: ", in)
+	room, _, err := GetPeerAndRoom(in.BaseInfo.PeerId, in.BaseInfo.RoomId)
+	if err != nil {
+		return err
+	}
+	return room.HandlePipeProducer(in.ProducerId, in.Action)
+}
+
+func (h *NodeHandler) ClosePipeTransport(ctx context.Context, in *v1.ClosePipeTransportRequest, out *v1.ClosePipeTransportResponse) error {
+	log.Debug("ClosePipeTransport() | req: ", in)
+	room, _, err := GetPeerAndRoom(in.BaseInfo.PeerId, in.BaseInfo.RoomId)
+	if err != nil {
+		return err
+	}
+	return room.ClosePipeTransport(in.TransportId)
+}

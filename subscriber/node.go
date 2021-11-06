@@ -2,59 +2,59 @@ package subscriber
 
 import (
 	"context"
-	"strings"
+	"encoding/json"
 
 	"github.com/itzmanish/go-micro/v2/errors"
-	"github.com/itzmanish/go-micro/v2/util/log"
+	log "github.com/itzmanish/go-micro/v2/logger"
 	"github.com/itzmanish/pratibimb-node/handler"
 	"github.com/itzmanish/pratibimb-node/internal"
 	v1 "github.com/itzmanish/pratibimb-node/proto/gen/node/v1"
 )
 
-type nodeSubscriber struct {
-	nodeID string
-}
-
-func NewNodeSubscriber(nodeId string) *nodeSubscriber {
-	return &nodeSubscriber{
-		nodeID: nodeId,
+func Handler(ctx context.Context, msg *v1.Message) error {
+	log.Info("node event recieved: ", msg)
+	roomInterface, ok := handler.Rooms.Load(msg.RoomId)
+	if !ok {
+		return nil
 	}
-}
-
-func (ns *nodeSubscriber) Handler(ctx context.Context, msg *v1.Message) error {
-	log.Info("event recieved: ", msg)
-	if strings.Contains(msg.Sub, "scale/") {
-		roomInterface, ok := handler.Rooms.Load(msg.RoomId)
-		if !ok {
-			return nil
-		}
-		room, ok := roomInterface.(*internal.Room)
-		if !ok {
-			return errors.InternalServerError("ROOM_TYPE_MISMATCH", "room has different type, this should not happen")
-		}
-		// emit createPipeTransport event for room with peer_id
-		// if msg.NodeId != ns.nodeID {
-		room.Emit("scale", msg)
-		// }
+	room, ok := roomInterface.(*internal.Room)
+	if !ok {
+		return errors.InternalServerError("ROOM_TYPE_MISMATCH", "room has different type, this should not happen")
 	}
 
-	// sentInterface, ok := event.Sents.Load(msg.Cid)
-	// if ok {
-	// 	// check if this message is sent by this server itself
-	// 	if msg.NodeId != ns.nodeID && msg.IsResponse {
-	// 		event.Sents.Delete(msg.Cid)
-	// 		sent := sentInterface.(*event.SentInfo)
-	// 		if msg.Error != "" {
-	// 			sent.RespCh <- event.Response{
-	// 				Err: errors.New("RESPONSE_ERROR", msg.Error, 500),
-	// 			}
-	// 		} else {
-	// 			sent.RespCh <- event.Response{
-	// 				Data: msg.Data,
-	// 			}
-	// 		}
-	// 	}
-	// }
+	var payload internal.H
+	err := json.Unmarshal(msg.Payload, &payload)
+	if err != nil {
+		log.Warnf("unmarshal payload failed, err: %v", err)
+		return err
+	}
+
+	switch msg.Sub {
+	case "pipeProducer.close":
+		err = room.HandlePipeProducer(payload["producerId"].(string), v1.Action_CLOSE)
+		if err != nil && err != internal.ErrPipeProducerNotFound(payload["producer_id"].(string)) {
+			log.Warnf("pipeProducer.close | err: %v", err)
+			return err
+		}
+	case "pipeProducer.pause":
+		err = room.HandlePipeProducer(payload["producerId"].(string), v1.Action_PAUSE)
+		if err != nil && err != internal.ErrPipeProducerNotFound(payload["producerId"].(string)) {
+			log.Warnf("pipeProducer.pause | err: %v", err)
+			return err
+		}
+	case "pipeProducer.resume":
+		err = room.HandlePipeProducer(payload["producerId"].(string), v1.Action_RESUME)
+		if err != nil && err != internal.ErrPipeProducerNotFound(payload["producerId"].(string)) {
+			log.Warnf("pipeProducer.resume | err: %v", err)
+			return err
+		}
+	case "pipeConsumer.close":
+		err = room.ClosePipeConsumer(payload["pipeConsumerId"].(string))
+		if err != nil && err != internal.ErrPipeConsumerNotFound(payload["pipeConsumerId"].(string)) {
+			log.Warnf("pipeConsumer.close | err: %v", err)
+			return err
+		}
+	}
 
 	return nil
 }

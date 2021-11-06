@@ -55,7 +55,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	err := micro.RegisterSubscriber(serviceName, service.Server(), subscriber.NewNodeSubscriber(publicAddressWithPort))
+	err := micro.RegisterSubscriber(serviceName, service.Server(), subscriber.Handler)
 	if err != nil {
 		log.Fatal()
 	}

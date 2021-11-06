@@ -33,6 +33,9 @@ service NodeService {
   rpc ConnectPipeTransport (ConnectPipeTransportRequest) returns (ConnectPipeTransportResponse);
   rpc ProducePipeTransport (ProducePipeTransportRequest) returns (ProducePipeTransportResponse);
   rpc ConsumePipeTransport (ConsumePipeTransportRequest) returns (ConsumePipeTransportResponse);
+
+  rpc PipeProducerAction (PipeProducerActionRequest) returns (PipeProducerActionResponse);
+  rpc ClosePipeTransport (ClosePipeTransportRequest) returns (ClosePipeTransportResponse);
 }
 
 message Message {
@@ -163,9 +166,7 @@ message ProducerActionRequest {
   string producer_id = 2;
   Action action = 3;
 }
-message ProducerActionResponse {
-
-}
+message ProducerActionResponse {}
 
 message ConsumeRequest {
   BasicInfo base_info = 1;
@@ -228,8 +229,7 @@ message ConnectPipeTransportRequest {
   bytes srtp_parameters = 4;
 }
 
-message ConnectPipeTransportResponse {
-}
+message ConnectPipeTransportResponse {}
 
 message ProducePipeTransportRequest {
   BasicInfo base_info = 1;
@@ -242,8 +242,7 @@ message ProducePipeTransportRequest {
   bytes app_data = 8;
 }
 
-message ProducePipeTransportResponse {
-}
+message ProducePipeTransportResponse {}
 
 message ConsumePipeTransportRequest {
   BasicInfo base_info = 1;
@@ -261,6 +260,22 @@ message ConsumePipeTransportResponse {
   bytes rtp_parameters = 6;
   bytes app_data = 7;
 }
+
+message PipeProducerActionRequest {
+  BasicInfo base_info = 1;
+  string producer_id = 2;
+  Action action = 3;
+}
+
+message PipeProducerActionResponse {}
+
+message ClosePipeTransportRequest {
+  BasicInfo base_info = 1;
+  string transport_id = 2;
+}
+
+message ClosePipeTransportResponse {}
+
 
 
 enum Action {

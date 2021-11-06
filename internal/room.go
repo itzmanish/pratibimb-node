@@ -19,23 +19,29 @@ import (
 
 type Room struct {
 	EventEmitter
-	locker                sync.RWMutex
-	NodeID                string
-	ID                    uuid.UUID
-	RoomName              string
-	AudioLevelObserver    mediasoup.IRtpObserver
-	Routers               map[string]*mediasoup.Router
+	locker             sync.RWMutex
+	NodeID             string
+	ID                 uuid.UUID
+	RoomName           string
+	AudioLevelObserver mediasoup.IRtpObserver
+	// Routers sis a map of router id to Router
+	Routers map[string]*mediasoup.Router
+	// mapPipeTransportQueue is a map of transport id to pipeTransport for unconnected pipeTransport
 	mapPipeTransportQueue map[string]*mediasoup.PipeTransport
-	mapPipeTransports     map[string]*mediasoup.PipeTransport
-	mapPipeProducers      map[string]*mediasoup.Producer
-	mapPipeConsumers      map[string]*mediasoup.Consumer
-	peers                 map[uuid.UUID]*Peer
-	lastN                 []uuid.UUID
-	logger                log.Logger
-	closed                int32
-	locked                bool
-	core_publisher        micro.Event
-	internal_publisher    micro.Event
+	// mapPipeTransports is a map of transport id to pipeTransport for connected pipeTransport
+	mapPipeTransports map[string]*mediasoup.PipeTransport
+	// mapPipeProducers is a map of pipeProducer id to Producer
+	mapPipeProducers map[string]*mediasoup.Producer
+	// mapPipeConsumers is a map of pipeConsumer id to Consumer
+	mapPipeConsumers map[string]*mediasoup.Consumer
+	// peers is a map of peer uuid to Peer
+	peers              map[uuid.UUID]*Peer
+	lastN              []uuid.UUID
+	logger             log.Logger
+	closed             int32
+	locked             bool
+	core_publisher     micro.Event
+	internal_publisher micro.Event
 }
 
 func NewRoom(mediasoupWorker []*mediasoup.Worker, roomID uuid.UUID, roomName string, core_publisher, internal_publisher micro.Event) (*Room, error) {
@@ -52,37 +58,12 @@ func NewRoom(mediasoupWorker []*mediasoup.Worker, roomID uuid.UUID, roomName str
 		}
 		routers[router.Id()] = router
 	}
-
-	audioLevelObserverOption := &mediasoup.AudioLevelObserverOptions{
-		MaxEntries: 1,
-		Threshold:  -80,
-		Interval:   800,
-	}
-
 	log.Debugf("Routers available: %v, Count: %d", routers, len(routers))
-
-	firstRouter, err := getNextRouter(nil, routers)
-	if err != nil {
-		return nil, err
-	}
-
-	// Create a mediasoup AudioLevelObserver on first router
-	audioLevelObserver, err := firstRouter.CreateAudioLevelObserver(
-		func(o *mediasoup.AudioLevelObserverOptions) {
-			o.MaxEntries = audioLevelObserverOption.MaxEntries
-			o.Threshold = audioLevelObserverOption.Threshold
-			o.Interval = audioLevelObserverOption.Interval
-		},
-	)
-	if err != nil {
-		return nil, errors.InternalServerError("NewRoom(): CreateAudioLevelObserver", err.Error())
-	}
 
 	room := &Room{
 		ID:                    roomID,
 		RoomName:              roomName,
 		Routers:               routers,
-		AudioLevelObserver:    audioLevelObserver,
 		logger:                log.NewLogger(log.WithFields(map[string]interface{}{"caller": "Room"})),
 		peers:                 make(map[uuid.UUID]*Peer),
 		EventEmitter:          eventemitter.NewEventEmitter(),
@@ -94,8 +75,6 @@ func NewRoom(mediasoupWorker []*mediasoup.Worker, roomID uuid.UUID, roomName str
 		mapPipeProducers:      make(map[string]*mediasoup.Producer),
 		mapPipeConsumers:      make(map[string]*mediasoup.Consumer),
 	}
-
-	room.handleAudioLevelObserver()
 
 	return room, nil
 }
@@ -126,6 +105,15 @@ func (r *Room) Close() {
 	}
 	for _, router := range r.Routers {
 		router.Close()
+	}
+	for _, pipeProducer := range r.mapPipeProducers {
+		pipeProducer.Close()
+	}
+	for _, pipeConsumer := range r.mapPipeConsumers {
+		pipeConsumer.Close()
+	}
+	for _, pipeTransport := range r.mapPipeTransports {
+		pipeTransport.Close()
 	}
 	r.SafeEmit("close")
 }
@@ -207,6 +195,7 @@ func (r *Room) HandlePeer(peer *Peer, returning bool) {
 
 func (r *Room) handleAudioLevelObserver() {
 	r.AudioLevelObserver.On("volumes", func(volumes []mediasoup.AudioLevelObserverVolume) {
+		r.logger.Logf(log.DebugLevel, "volume changed: %v", volumes)
 		producer := volumes[0].Producer
 		volume := volumes[0].Volume
 		// todo: fix this
@@ -245,6 +234,27 @@ func (r *Room) peerJoining(peer *Peer, returning bool) {
 	r.locker.Unlock()
 
 	peer.router = r.GetLeastLoadedRouter(peer)
+	if r.AudioLevelObserver == nil {
+		audioLevelObserverOption := &mediasoup.AudioLevelObserverOptions{
+			MaxEntries: 1,
+			Threshold:  -80,
+			Interval:   800,
+		}
+		// Create a mediasoup AudioLevelObserver on first router
+		audioLevelObserver, err := peer.router.CreateAudioLevelObserver(
+			func(o *mediasoup.AudioLevelObserverOptions) {
+				o.MaxEntries = audioLevelObserverOption.MaxEntries
+				o.Threshold = audioLevelObserverOption.Threshold
+				o.Interval = audioLevelObserverOption.Interval
+			},
+		)
+		if err == nil {
+			r.AudioLevelObserver = audioLevelObserver
+			r.handleAudioLevelObserver()
+		} else {
+			r.logger.Logf(log.ErrorLevel, "NewRoom(): CreateAudioLevelObserver | err: %v", err)
+		}
+	}
 	r.handlePeer(peer)
 }
 
@@ -283,6 +293,10 @@ func (r *Room) handlePeerClose(peer *Peer) {
 	}
 	r.peers = filteredPeers
 	r.locker.Unlock()
+
+	if len(r.Peers()) == 0 {
+		r.Close()
+	}
 
 }
 
@@ -324,9 +338,7 @@ func (r *Room) CreateWebRtcTransport(peer *Peer, opt CreateWebRtcTransportOption
 	if err != nil {
 		return nil, err
 	}
-	// transport.On("sctpstatechange", func(sctpState mediasoup.SctpState) {
-	// 	r.logger.Log(log.DebugLevel,fmt.Sprintf("sctpState: %v WebRtcTransport: %v Event",sctpState,sctpstatechange))
-	// })
+
 	transport.On("dtlsstatechange", func(dtlsState mediasoup.DtlsState) {
 		if dtlsState == "failed" || dtlsState == "closed" {
 			r.logger.Log(log.WarnLevel, fmt.Sprintf("WebRtcTransport 'dtlsstatechange' event [dtlsState: %s]", dtlsState))
@@ -512,6 +524,43 @@ func (r *Room) HandleConsumer(peer *Peer, consumerId string, action v1.Action) (
 	return data, nil
 }
 
+func (r *Room) HandlePipeProducer(producerId string, action v1.Action) error {
+	r.locker.RLock()
+	pipeProducer, ok := r.mapPipeProducers[producerId]
+	r.locker.RUnlock()
+	if !ok {
+		return ErrPipeProducerNotFound(producerId)
+	}
+	switch action {
+	case v1.Action_CLOSE:
+		pipeProducer.Close()
+		r.locker.Lock()
+		delete(r.mapPipeProducers, producerId)
+		r.locker.Unlock()
+	case v1.Action_PAUSE:
+		return pipeProducer.Pause()
+	case v1.Action_RESUME:
+		return pipeProducer.Resume()
+	default:
+		return ErrActionNotDefined
+	}
+	return nil
+}
+
+func (r *Room) ClosePipeConsumer(consumerId string) error {
+	r.locker.RLock()
+	pipeConsumer, ok := r.mapPipeConsumers[consumerId]
+	r.locker.RUnlock()
+	if !ok {
+		return ErrPipeConsumerNotFound(consumerId)
+	}
+	pipeConsumer.Close()
+	r.locker.Lock()
+	delete(r.mapPipeConsumers, consumerId)
+	r.locker.Unlock()
+	return nil
+}
+
 func (r *Room) GetStats(peer *Peer, id string, statsType v1.StatsType) ([]byte, error) {
 	// Ensure the Peer is joined.
 	if !peer.GetJoined() {
@@ -651,7 +700,6 @@ func (r *Room) CreateConsumer(consumerPeer *Peer, producerID string, producerMed
 		ProducerPaused: consumer.ProducerPaused(),
 		AppData:        consumer.AppData(),
 	}, nil
-
 }
 
 // getJoinedPeers returns joined peers
@@ -766,7 +814,7 @@ func (r *Room) ConnectPipeTransport(peer *Peer, opts ConnectPipeTransportOptions
 		return err
 	}
 	transport.Observer().On("close", func() {
-		err := r.core_publisher.Publish(context.TODO(), CreateNotification("internal/pipeTransport.close", H{"transport_id": transport.Id()}, peer.GetID(), r.RoomName))
+		err := r.core_publisher.Publish(context.TODO(), CreateNotification("internal/pipeTransport.close", H{"transport_id": transport.Id(), "router_id": peer.GetRouterID()}, peer.GetID(), r.RoomName))
 		if err != nil {
 			r.logger.Log(log.ErrorLevel, err)
 		}
@@ -814,23 +862,20 @@ func (r *Room) ConsumePipeTransport(peer *Peer, producerId, transportId string) 
 	// Pipe events from the pipe Consumer to the pipe Producer.
 	pipeConsumer.Observer().On("close", func() {
 		// close pipeProducer on remote
-		r.core_publisher.Publish(context.TODO(), CreateNotification("internal/pipeProducer.close", H{"producerId": producerId}, peer.GetID(), r.RoomName))
+		r.internal_publisher.Publish(context.TODO(), CreateNotification("pipeProducer.close", H{"producerId": producerId}, peer.GetID(), r.GetID()))
 
 	})
 	pipeConsumer.Observer().On("pause", func() {
 		// pause pipeProducer on remote
-		r.core_publisher.Publish(context.TODO(), CreateNotification("internal/pipeProducer.pause", H{"producerId": producerId}, peer.GetID(), r.RoomName))
+		r.internal_publisher.Publish(context.TODO(), CreateNotification("pipeProducer.pause", H{"producerId": producerId}, peer.GetID(), r.GetID()))
 
 	})
 	pipeConsumer.Observer().On("resume", func() {
 		// resume pipeProducer on remote
-		r.core_publisher.Publish(context.TODO(), CreateNotification("internal/pipeProducer.resume", H{"producerId": producerId}, peer.GetID(), r.RoomName))
+		r.internal_publisher.Publish(context.TODO(), CreateNotification("pipeProducer.resume", H{"producerId": producerId}, peer.GetID(), r.GetID()))
 
 	})
 
-	// fire pipeconsumer close if pipeProducer gets close in remote router
-	// Pipe events from the pipe Producer to the pipe Consumer.
-	// pipeProducer.Observer().On("close", func() { pipeConsumer.Close() })
 	r.locker.Lock()
 	r.mapPipeConsumers[pipeConsumer.Id()] = pipeConsumer
 	r.locker.Unlock()
@@ -865,7 +910,7 @@ func (r *Room) ProducePipeTransport(peer *Peer, opts ProducePipeTransportPayload
 		return err
 	}
 	pipeProducer.Observer().On("close", func() {
-		r.core_publisher.Publish(context.TODO(), CreateNotification("internal/pipeProducer.close", H{"pipeConsumerId": opts.PipeConsumerID}, peer.GetID(), r.RoomName))
+		r.internal_publisher.Publish(context.TODO(), CreateNotification("pipeConsumer.close", H{"pipeConsumerId": opts.PipeConsumerID}, peer.GetID(), r.GetID()))
 		r.locker.Lock()
 		delete(r.mapPipeProducers, pipeProducer.Id())
 		r.locker.Unlock()
@@ -873,6 +918,17 @@ func (r *Room) ProducePipeTransport(peer *Peer, opts ProducePipeTransportPayload
 	r.locker.Lock()
 	r.mapPipeProducers[pipeProducer.Id()] = pipeProducer
 	r.locker.Unlock()
+	return nil
+}
+
+func (r *Room) ClosePipeTransport(transportId string) error {
+	r.locker.RLock()
+	pipeTransport, ok := r.mapPipeTransports[transportId]
+	r.locker.RUnlock()
+	if !ok {
+		return ErrPipeTransportNotFound(transportId)
+	}
+	pipeTransport.Close()
 	return nil
 }
 

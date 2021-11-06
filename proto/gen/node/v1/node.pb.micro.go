@@ -61,6 +61,8 @@ type NodeService interface {
 	ConnectPipeTransport(ctx context.Context, in *ConnectPipeTransportRequest, opts ...client.CallOption) (*ConnectPipeTransportResponse, error)
 	ProducePipeTransport(ctx context.Context, in *ProducePipeTransportRequest, opts ...client.CallOption) (*ProducePipeTransportResponse, error)
 	ConsumePipeTransport(ctx context.Context, in *ConsumePipeTransportRequest, opts ...client.CallOption) (*ConsumePipeTransportResponse, error)
+	PipeProducerAction(ctx context.Context, in *PipeProducerActionRequest, opts ...client.CallOption) (*PipeProducerActionResponse, error)
+	ClosePipeTransport(ctx context.Context, in *ClosePipeTransportRequest, opts ...client.CallOption) (*ClosePipeTransportResponse, error)
 }
 
 type nodeService struct {
@@ -265,6 +267,26 @@ func (c *nodeService) ConsumePipeTransport(ctx context.Context, in *ConsumePipeT
 	return out, nil
 }
 
+func (c *nodeService) PipeProducerAction(ctx context.Context, in *PipeProducerActionRequest, opts ...client.CallOption) (*PipeProducerActionResponse, error) {
+	req := c.c.NewRequest(c.name, "NodeService.PipeProducerAction", in)
+	out := new(PipeProducerActionResponse)
+	err := c.c.Call(ctx, req, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *nodeService) ClosePipeTransport(ctx context.Context, in *ClosePipeTransportRequest, opts ...client.CallOption) (*ClosePipeTransportResponse, error) {
+	req := c.c.NewRequest(c.name, "NodeService.ClosePipeTransport", in)
+	out := new(ClosePipeTransportResponse)
+	err := c.c.Call(ctx, req, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // Server API for NodeService service
 
 type NodeServiceHandler interface {
@@ -293,6 +315,8 @@ type NodeServiceHandler interface {
 	ConnectPipeTransport(context.Context, *ConnectPipeTransportRequest, *ConnectPipeTransportResponse) error
 	ProducePipeTransport(context.Context, *ProducePipeTransportRequest, *ProducePipeTransportResponse) error
 	ConsumePipeTransport(context.Context, *ConsumePipeTransportRequest, *ConsumePipeTransportResponse) error
+	PipeProducerAction(context.Context, *PipeProducerActionRequest, *PipeProducerActionResponse) error
+	ClosePipeTransport(context.Context, *ClosePipeTransportRequest, *ClosePipeTransportResponse) error
 }
 
 func RegisterNodeServiceHandler(s server.Server, hdlr NodeServiceHandler, opts ...server.HandlerOption) error {
@@ -316,6 +340,8 @@ func RegisterNodeServiceHandler(s server.Server, hdlr NodeServiceHandler, opts .
 		ConnectPipeTransport(ctx context.Context, in *ConnectPipeTransportRequest, out *ConnectPipeTransportResponse) error
 		ProducePipeTransport(ctx context.Context, in *ProducePipeTransportRequest, out *ProducePipeTransportResponse) error
 		ConsumePipeTransport(ctx context.Context, in *ConsumePipeTransportRequest, out *ConsumePipeTransportResponse) error
+		PipeProducerAction(ctx context.Context, in *PipeProducerActionRequest, out *PipeProducerActionResponse) error
+		ClosePipeTransport(ctx context.Context, in *ClosePipeTransportRequest, out *ClosePipeTransportResponse) error
 	}
 	type NodeService struct {
 		nodeService
@@ -402,4 +428,12 @@ func (h *nodeServiceHandler) ProducePipeTransport(ctx context.Context, in *Produ
 
 func (h *nodeServiceHandler) ConsumePipeTransport(ctx context.Context, in *ConsumePipeTransportRequest, out *ConsumePipeTransportResponse) error {
 	return h.NodeServiceHandler.ConsumePipeTransport(ctx, in, out)
+}
+
+func (h *nodeServiceHandler) PipeProducerAction(ctx context.Context, in *PipeProducerActionRequest, out *PipeProducerActionResponse) error {
+	return h.NodeServiceHandler.PipeProducerAction(ctx, in, out)
+}
+
+func (h *nodeServiceHandler) ClosePipeTransport(ctx context.Context, in *ClosePipeTransportRequest, out *ClosePipeTransportResponse) error {
+	return h.NodeServiceHandler.ClosePipeTransport(ctx, in, out)
 }
