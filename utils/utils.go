@@ -12,6 +12,7 @@ import (
 	mrand "math/rand"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -205,4 +206,26 @@ func Clone(dst, source interface{}) error {
 		return err
 	}
 	return json.Unmarshal(data, dst)
+}
+
+func GetSelfIPOnEC2() string {
+	// curl http://169.254.169.254/latest/meta-data/local-ipv4
+	res, err := http.Get("http://169.254.169.254/latest/meta-data/local-ipv4")
+	if err != nil {
+		return "127.0.0.1"
+	}
+	defer res.Body.Close()
+	ip, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return "127.0.0.1"
+	}
+	return string(ip)
+}
+
+func GetSelfIP() string {
+	if os.Getenv("ENV") != "production" {
+		return "127.0.0.1"
+	} else {
+		return GetSelfIPOnEC2()
+	}
 }

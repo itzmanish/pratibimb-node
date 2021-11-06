@@ -24,6 +24,15 @@ service NodeService {
   rpc ConsumerAction (ConsumerActionRequest) returns (ConsumerActionResponse);
   // Get stats of transport/consumer/producer
   rpc GetStats (GetStatsRequest) returns (GetStatsResponse);
+
+  // Check if router has the producer already
+  rpc PeerRouterHasProducer (PeerRouterHasProducerRequest) returns (PeerRouterHasProducerResponse);
+
+  // PipeTransports for one node to another
+  rpc CreatePipeTransport (CreatePipeTransportRequest) returns (CreatePipeTransportResponse);
+  rpc ConnectPipeTransport (ConnectPipeTransportRequest) returns (ConnectPipeTransportResponse);
+  rpc ProducePipeTransport (ProducePipeTransportRequest) returns (ProducePipeTransportResponse);
+  rpc ConsumePipeTransport (ConsumePipeTransportRequest) returns (ConsumePipeTransportResponse);
 }
 
 message Message {
@@ -192,6 +201,67 @@ message GetStatsRequest {
 message GetStatsResponse {
   bytes stats = 1;
 }
+
+message PeerRouterHasProducerRequest {
+  BasicInfo base_info = 1;
+  string producer_id = 2;
+}
+message PeerRouterHasProducerResponse {
+  bool has_producer = 1;
+}
+
+message CreatePipeTransportRequest {
+  BasicInfo base_info = 1;
+  bytes pipe_transport_options = 2;
+}
+
+message CreatePipeTransportResponse {
+  string transport_id = 1;
+  bytes tuple = 2;
+  bytes srtp_parameters = 3;
+}
+
+message ConnectPipeTransportRequest {
+  BasicInfo base_info = 1;
+  string transport_id = 2;
+  bytes tuple = 3;
+  bytes srtp_parameters = 4;
+}
+
+message ConnectPipeTransportResponse {
+}
+
+message ProducePipeTransportRequest {
+  BasicInfo base_info = 1;
+  string producer_id =2;
+  string transport_id = 3;
+  string pipe_consumer_id = 4;
+  string media_kind = 5;
+  bool paused = 6;
+  bytes rtp_parameters = 7;
+  bytes app_data = 8;
+}
+
+message ProducePipeTransportResponse {
+}
+
+message ConsumePipeTransportRequest {
+  BasicInfo base_info = 1;
+  string producer_id = 2;
+  string transport_id =3;
+
+}
+
+message ConsumePipeTransportResponse {
+  string producer_id =1;
+  string transport_id = 2;
+  string pipe_consumer_id = 3;
+  string media_kind = 4;
+  bool paused = 5;
+  bytes rtp_parameters = 6;
+  bytes app_data = 7;
+}
+
 
 enum Action {
   UNDEFINED_ACTION = 0;

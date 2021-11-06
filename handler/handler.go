@@ -44,17 +44,17 @@ func NewNodeServiceHandler(config internal.Config, ev, iev micro.Event) *NodeHan
 				os.Exit(1)
 			})
 		})
-		go func() {
-			ticker := time.NewTicker(120 * time.Second)
-			for range ticker.C {
-				usage, err := worker.GetResourceUsage()
-				if err != nil {
-					log.Error(err, "pid", worker.Pid(), "mediasoup Worker resource usage")
-					continue
-				}
-				log.Debug("pid", worker.Pid(), "usage", usage, "mediasoup Worker resource usage")
-			}
-		}()
+		// go func() {
+		// 	ticker := time.NewTicker(120 * time.Second)
+		// 	for range ticker.C {
+		// 		usage, err := worker.GetResourceUsage()
+		// 		if err != nil {
+		// 			log.Error(err, "pid", worker.Pid(), "mediasoup Worker resource usage")
+		// 			continue
+		// 		}
+		// 		log.Debug("pid", worker.Pid(), "usage", usage, "mediasoup Worker resource usage")
+		// 	}
+		// }()
 		workers = append(workers, worker)
 	}
 
@@ -315,6 +315,28 @@ func (h *NodeHandler) GetStats(ctx context.Context, in *v1.GetStatsRequest, out 
 	if err != nil {
 		return err
 	}
+	return nil
+}
+
+// PeerRouterHasProducer verifies that if the router associated with peer have the producer already.
+func (h *NodeHandler) PeerRouterHasProducer(ctx context.Context, in *v1.PeerRouterHasProducerRequest, out *v1.PeerRouterHasProducerResponse) error {
+	log.Debug("PeerRouterHasProducer() | req: ", in)
+	_, peer, err := GetPeerAndRoom(in.BaseInfo.PeerId, in.BaseInfo.RoomId)
+	if err != nil {
+		return err
+	}
+	router := peer.GetRouter()
+	if router == nil {
+		return internal.ErrNoRouterExists
+	}
+	var has bool
+	for _, producer := range router.Producers() {
+		if producer.Id() == in.ProducerId {
+			has = true
+			break
+		}
+	}
+	out.HasProducer = has
 	return nil
 }
 

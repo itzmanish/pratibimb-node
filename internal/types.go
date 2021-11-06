@@ -139,39 +139,10 @@ type TransportTraceInfo struct {
 	AvailableBitrate        uint32
 }
 
-type RoomUpdateRequest struct {
-	RoomID   string `json:"room_id"`
-	PeerName string `json:"peer_name"`
-	PeerID   string `json:"peer_id"`
-}
-
-type Nodes map[string]*Node
-
-type StoreRoom struct {
-	ID         string           `json:"id"`
-	Name       string           `json:"name"`
-	Secret     int32            `json:"secret"`
-	PeersCount int              `json:"peers_count"`
-	Peers      []*StorePeer     `json:"peers"`
-	Nodes      map[string]*Node `json:"nodes"`
-}
-
-type StorePeer struct {
-	Name   string `json:"name"`
-	PeerID string `json:"peer_id"`
-}
-
 type Node struct {
 	ID         string   `json:"node_id"`
 	WSEndpoint string   `json:"ws_endpoint"`
 	Routers    []string `json:"routers"`
-}
-
-type ConnectPipeRouterPayload struct {
-	TransportID    string `json:"transport_id"`
-	Cid            string `json:"correlation_id"`
-	Tuple          mediasoup.TransportTuple
-	SrtpParameters *mediasoup.SrtpParameters
 }
 
 type StrArray []string
@@ -204,6 +175,12 @@ type RoomRequest struct {
 	RoomID uuid.UUID `json:"room_id"`
 	PeerID uuid.UUID `json:"peer_id"`
 	Data   []byte    `json:"data"`
+}
+
+type ConnectPipeTransportOptions struct {
+	TransportID    string `json:"transport_id"`
+	Tuple          mediasoup.TransportTuple
+	SrtpParameters *mediasoup.SrtpParameters
 }
 
 type CreateWebRtcTransportOption struct {

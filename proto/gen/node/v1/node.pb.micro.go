@@ -54,6 +54,13 @@ type NodeService interface {
 	ConsumerAction(ctx context.Context, in *ConsumerActionRequest, opts ...client.CallOption) (*ConsumerActionResponse, error)
 	// Get stats of transport/consumer/producer
 	GetStats(ctx context.Context, in *GetStatsRequest, opts ...client.CallOption) (*GetStatsResponse, error)
+	// Check if router has the producer already
+	PeerRouterHasProducer(ctx context.Context, in *PeerRouterHasProducerRequest, opts ...client.CallOption) (*PeerRouterHasProducerResponse, error)
+	// PipeTransports for one node to another
+	CreatePipeTransport(ctx context.Context, in *CreatePipeTransportRequest, opts ...client.CallOption) (*CreatePipeTransportResponse, error)
+	ConnectPipeTransport(ctx context.Context, in *ConnectPipeTransportRequest, opts ...client.CallOption) (*ConnectPipeTransportResponse, error)
+	ProducePipeTransport(ctx context.Context, in *ProducePipeTransportRequest, opts ...client.CallOption) (*ProducePipeTransportResponse, error)
+	ConsumePipeTransport(ctx context.Context, in *ConsumePipeTransportRequest, opts ...client.CallOption) (*ConsumePipeTransportResponse, error)
 }
 
 type nodeService struct {
@@ -208,6 +215,56 @@ func (c *nodeService) GetStats(ctx context.Context, in *GetStatsRequest, opts ..
 	return out, nil
 }
 
+func (c *nodeService) PeerRouterHasProducer(ctx context.Context, in *PeerRouterHasProducerRequest, opts ...client.CallOption) (*PeerRouterHasProducerResponse, error) {
+	req := c.c.NewRequest(c.name, "NodeService.PeerRouterHasProducer", in)
+	out := new(PeerRouterHasProducerResponse)
+	err := c.c.Call(ctx, req, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *nodeService) CreatePipeTransport(ctx context.Context, in *CreatePipeTransportRequest, opts ...client.CallOption) (*CreatePipeTransportResponse, error) {
+	req := c.c.NewRequest(c.name, "NodeService.CreatePipeTransport", in)
+	out := new(CreatePipeTransportResponse)
+	err := c.c.Call(ctx, req, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *nodeService) ConnectPipeTransport(ctx context.Context, in *ConnectPipeTransportRequest, opts ...client.CallOption) (*ConnectPipeTransportResponse, error) {
+	req := c.c.NewRequest(c.name, "NodeService.ConnectPipeTransport", in)
+	out := new(ConnectPipeTransportResponse)
+	err := c.c.Call(ctx, req, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *nodeService) ProducePipeTransport(ctx context.Context, in *ProducePipeTransportRequest, opts ...client.CallOption) (*ProducePipeTransportResponse, error) {
+	req := c.c.NewRequest(c.name, "NodeService.ProducePipeTransport", in)
+	out := new(ProducePipeTransportResponse)
+	err := c.c.Call(ctx, req, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *nodeService) ConsumePipeTransport(ctx context.Context, in *ConsumePipeTransportRequest, opts ...client.CallOption) (*ConsumePipeTransportResponse, error) {
+	req := c.c.NewRequest(c.name, "NodeService.ConsumePipeTransport", in)
+	out := new(ConsumePipeTransportResponse)
+	err := c.c.Call(ctx, req, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // Server API for NodeService service
 
 type NodeServiceHandler interface {
@@ -229,6 +286,13 @@ type NodeServiceHandler interface {
 	ConsumerAction(context.Context, *ConsumerActionRequest, *ConsumerActionResponse) error
 	// Get stats of transport/consumer/producer
 	GetStats(context.Context, *GetStatsRequest, *GetStatsResponse) error
+	// Check if router has the producer already
+	PeerRouterHasProducer(context.Context, *PeerRouterHasProducerRequest, *PeerRouterHasProducerResponse) error
+	// PipeTransports for one node to another
+	CreatePipeTransport(context.Context, *CreatePipeTransportRequest, *CreatePipeTransportResponse) error
+	ConnectPipeTransport(context.Context, *ConnectPipeTransportRequest, *ConnectPipeTransportResponse) error
+	ProducePipeTransport(context.Context, *ProducePipeTransportRequest, *ProducePipeTransportResponse) error
+	ConsumePipeTransport(context.Context, *ConsumePipeTransportRequest, *ConsumePipeTransportResponse) error
 }
 
 func RegisterNodeServiceHandler(s server.Server, hdlr NodeServiceHandler, opts ...server.HandlerOption) error {
@@ -247,6 +311,11 @@ func RegisterNodeServiceHandler(s server.Server, hdlr NodeServiceHandler, opts .
 		Consume(ctx context.Context, in *ConsumeRequest, out *ConsumeResponse) error
 		ConsumerAction(ctx context.Context, in *ConsumerActionRequest, out *ConsumerActionResponse) error
 		GetStats(ctx context.Context, in *GetStatsRequest, out *GetStatsResponse) error
+		PeerRouterHasProducer(ctx context.Context, in *PeerRouterHasProducerRequest, out *PeerRouterHasProducerResponse) error
+		CreatePipeTransport(ctx context.Context, in *CreatePipeTransportRequest, out *CreatePipeTransportResponse) error
+		ConnectPipeTransport(ctx context.Context, in *ConnectPipeTransportRequest, out *ConnectPipeTransportResponse) error
+		ProducePipeTransport(ctx context.Context, in *ProducePipeTransportRequest, out *ProducePipeTransportResponse) error
+		ConsumePipeTransport(ctx context.Context, in *ConsumePipeTransportRequest, out *ConsumePipeTransportResponse) error
 	}
 	type NodeService struct {
 		nodeService
@@ -313,4 +382,24 @@ func (h *nodeServiceHandler) ConsumerAction(ctx context.Context, in *ConsumerAct
 
 func (h *nodeServiceHandler) GetStats(ctx context.Context, in *GetStatsRequest, out *GetStatsResponse) error {
 	return h.NodeServiceHandler.GetStats(ctx, in, out)
+}
+
+func (h *nodeServiceHandler) PeerRouterHasProducer(ctx context.Context, in *PeerRouterHasProducerRequest, out *PeerRouterHasProducerResponse) error {
+	return h.NodeServiceHandler.PeerRouterHasProducer(ctx, in, out)
+}
+
+func (h *nodeServiceHandler) CreatePipeTransport(ctx context.Context, in *CreatePipeTransportRequest, out *CreatePipeTransportResponse) error {
+	return h.NodeServiceHandler.CreatePipeTransport(ctx, in, out)
+}
+
+func (h *nodeServiceHandler) ConnectPipeTransport(ctx context.Context, in *ConnectPipeTransportRequest, out *ConnectPipeTransportResponse) error {
+	return h.NodeServiceHandler.ConnectPipeTransport(ctx, in, out)
+}
+
+func (h *nodeServiceHandler) ProducePipeTransport(ctx context.Context, in *ProducePipeTransportRequest, out *ProducePipeTransportResponse) error {
+	return h.NodeServiceHandler.ProducePipeTransport(ctx, in, out)
+}
+
+func (h *nodeServiceHandler) ConsumePipeTransport(ctx context.Context, in *ConsumePipeTransportRequest, out *ConsumePipeTransportResponse) error {
+	return h.NodeServiceHandler.ConsumePipeTransport(ctx, in, out)
 }

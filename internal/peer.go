@@ -120,6 +120,10 @@ func (p *Peer) GetRouterID() string {
 	return p.router.Id()
 }
 
+func (p *Peer) GetRouter() *mediasoup.Router {
+	return p.router
+}
+
 func (p *Peer) GetRtpCapabilities() *mediasoup.RtpCapabilities {
 	return p.rtpCapabilities
 }
