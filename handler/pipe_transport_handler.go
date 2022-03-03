@@ -87,7 +87,7 @@ func (h *NodeHandler) ProducePipeTransport(ctx context.Context, in *v1.ProducePi
 		return err
 	}
 
-	return room.ProducePipeTransport(peer, internal.ProducePipeTransportPayload{
+	err = room.ProducePipeTransport(peer, internal.ProducePipeTransportPayload{
 		ProducerID:     in.ProducerId,
 		Kind:           mediasoup.MediaKind(in.MediaKind),
 		Paused:         in.Paused,
@@ -96,6 +96,12 @@ func (h *NodeHandler) ProducePipeTransport(ctx context.Context, in *v1.ProducePi
 		RtpParameters:  rtpParameters,
 		AppData:        appData,
 	})
+	if err != nil {
+		return err
+	}
+	// TODO: optimization is required here later
+	// room.PipeProducerToJoinedPeersRouter(peer, in.ProducerId)
+	return nil
 }
 
 func (h *NodeHandler) ConsumePipeTransport(ctx context.Context, in *v1.ConsumePipeTransportRequest, out *v1.ConsumePipeTransportResponse) error {

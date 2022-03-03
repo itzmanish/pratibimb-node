@@ -44,17 +44,17 @@ func NewNodeServiceHandler(config internal.Config, ev, iev micro.Event) *NodeHan
 				os.Exit(1)
 			})
 		})
-		// go func() {
-		// 	ticker := time.NewTicker(120 * time.Second)
-		// 	for range ticker.C {
-		// 		usage, err := worker.GetResourceUsage()
-		// 		if err != nil {
-		// 			log.Error(err, "pid", worker.Pid(), "mediasoup Worker resource usage")
-		// 			continue
-		// 		}
-		// 		log.Debug("pid", worker.Pid(), "usage", usage, "mediasoup Worker resource usage")
-		// 	}
-		// }()
+		go func() {
+			ticker := time.NewTicker(120 * time.Second)
+			for range ticker.C {
+				usage, err := worker.GetResourceUsage()
+				if err != nil {
+					log.Error(err, "pid", worker.Pid(), "mediasoup Worker resource usage")
+					continue
+				}
+				log.Debugf("pid: %v usages: %#v mediasoup Worker resource usage", worker.Pid(), usage)
+			}
+		}()
 		workers = append(workers, worker)
 	}
 
@@ -141,7 +141,7 @@ func (h *NodeHandler) Join(ctx context.Context, in *v1.JoinPeerRequest, out *v1.
 		return err
 	}
 	room.SetRtpCapabilities(peer, &rtpCapabilities)
-	room.PipeActiveProducersToLocalRouter(peer)
+	room.PipeActiveProducersToPeerRouter(peer)
 	return nil
 }
 

@@ -309,7 +309,7 @@ func (r *Room) SetRtpCapabilities(peer *Peer, rtpCapabilities *mediasoup.RtpCapa
 	peer.SetRtpCapabilities(rtpCapabilities)
 }
 
-func (r *Room) PipeActiveProducersToLocalRouter(peer *Peer) {
+func (r *Room) PipeActiveProducersToPeerRouter(peer *Peer) {
 	for _, joinedPeer := range r.getJoinedPeers(peer) {
 		for _, producer := range joinedPeer.GetProducers() {
 			var has bool
@@ -319,12 +319,39 @@ func (r *Room) PipeActiveProducersToLocalRouter(peer *Peer) {
 				}
 			}
 			if !has {
-				joinedPeer.router.PipeToRouter(mediasoup.PipeToRouterOptions{
+				r.logger.Logf(log.DebugLevel, "Piping producer: %v to router: %v", producer.Id(), peer.router.Id())
+				_, err := joinedPeer.router.PipeToRouter(mediasoup.PipeToRouterOptions{
 					ProducerId: producer.Id(),
 					Router:     peer.router,
 				})
+				if err != nil {
+					r.logger.Logf(log.WarnLevel, "PipeActiveProducersToPeerRouter() | err: %v", err)
+				}
 			}
 		}
+	}
+}
+
+func (r *Room) PipeProducerToJoinedPeersRouter(peer *Peer, producerId string) {
+	for _, joinedPeer := range r.getJoinedPeers(peer) {
+		var has bool
+		for _, rprod := range joinedPeer.router.Producers() {
+			if rprod.Id() == producerId {
+				has = true
+			}
+		}
+		if !has {
+			r.logger.Logf(log.DebugLevel, "Piping producer: %v to router: %v", producerId, joinedPeer.router.Id())
+			_, err := peer.router.PipeToRouter(mediasoup.PipeToRouterOptions{
+				ProducerId: producerId,
+				Router:     joinedPeer.router,
+			})
+			if err != nil {
+				r.logger.Logf(log.WarnLevel, "PipeProducerToJoinedPeersRouter() | err: %v", err)
+			}
+
+		}
+
 	}
 }
 
@@ -459,17 +486,11 @@ func (r *Room) Produce(peer *Peer, opt ProduceOption) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	pipeRouters := r.getRoutersToPipeTo(peer.GetRouterID())
-
-	for _, destinationRouter := range pipeRouters {
-		peer.router.PipeToRouter(mediasoup.PipeToRouterOptions{
-			ProducerId: producer.Id(),
-			Router:     destinationRouter,
-		})
-	}
 
 	// Store the Producer into the protoo Peer data Object.
 	peer.AddProducer(producer)
+
+	r.PipeProducerToJoinedPeersRouter(peer, producer.Id())
 
 	producer.On("score", func(score []mediasoup.ProducerScore) {
 		db := H{
@@ -773,8 +794,7 @@ func (r *Room) notification(peer *Peer, message string, data interface{}, broadc
 
 func (r *Room) GetLeastLoadedRouter(excludePeer ...*Peer) *mediasoup.Router {
 	router, _ := getNextRouter(r.Peers(), r.Routers, excludePeer...)
-	r.pipeProducersToRouter(router, excludePeer...)
-	// r.handleRemoteRouterPipeTransport(router)
+	// r.pipeProducersToRouter(router, excludePeer...)
 	return router
 }
 
@@ -786,6 +806,7 @@ func (r *Room) pipeProducersToRouter(router *mediasoup.Router, excludePeer ...*P
 			peersToPipe = append(peersToPipe, peer)
 		}
 	}
+
 	for _, peer := range peersToPipe {
 		srcRouter := r.Routers[peer.GetRouterID()]
 		for producerId := range peer.GetProducers() {
